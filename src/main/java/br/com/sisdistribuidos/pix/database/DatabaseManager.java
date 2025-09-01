@@ -5,20 +5,15 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-// Esta classe gerencia a conexão com o banco de dados H2.
-// Ela é responsável por iniciar o banco e criar as tabelas necessárias.
 public class DatabaseManager {
 
-    private static final String JDBC_URL = "jdbc:h2:mem:pix_db"; // Banco de dados em memória
+    private static final String JDBC_URL = "jdbc:h2:mem:pix_db";
     private static Connection connection = null;
 
-    // Método para obter a conexão com o banco de dados.
     public static Connection getConnection() throws SQLException {
         if (connection == null || connection.isClosed()) {
             try {
-                // Carrega o driver do H2
                 Class.forName("org.h2.Driver");
-                // Estabelece a conexão
                 connection = DriverManager.getConnection(JDBC_URL, "sa", "");
                 System.out.println("Conexão com o banco de dados H2 estabelecida.");
                 createTables();
@@ -43,12 +38,14 @@ public class DatabaseManager {
             statement.execute(createUsuarioTable);
             System.out.println("Tabela 'usuario' criada ou já existente.");
 
-            // Cria a tabela 'transacao'
+            // Cria a tabela 'transacao' com os novos campos de data
             String createTransacaoTable = "CREATE TABLE IF NOT EXISTS transacao (" +
                                           "id VARCHAR(255) PRIMARY KEY," +
                                           "valor DOUBLE NOT NULL," +
                                           "cpf_enviador VARCHAR(255) NOT NULL," +
                                           "cpf_recebedor VARCHAR(255) NOT NULL," +
+                                          "criado_em VARCHAR(255) NOT NULL," + // Adicionado
+                                          "atualizado_em VARCHAR(255) NOT NULL," + // Adicionado
                                           "FOREIGN KEY (cpf_enviador) REFERENCES usuario(cpf)," +
                                           "FOREIGN KEY (cpf_recebedor) REFERENCES usuario(cpf)" +
                                           ")";
@@ -57,7 +54,6 @@ public class DatabaseManager {
         }
     }
     
-    // Método para fechar a conexão com o banco de dados
     public static void closeConnection() {
         try {
             if (connection != null && !connection.isClosed()) {

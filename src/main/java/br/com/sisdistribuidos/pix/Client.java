@@ -5,6 +5,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpRequest.BodyPublishers;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Scanner;
 
 public class Client {
@@ -12,6 +14,7 @@ public class Client {
     private static final String SERVER_URL = "http://localhost:4567";
     private static String sessionToken = null;
     private static final HttpClient client = HttpClient.newHttpClient();
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     public static void main(String[] args) {
         System.out.println("Cliente PIX de Sistemas Distribuídos.");
@@ -23,13 +26,14 @@ public class Client {
             System.out.println("1. Criar usuário");
             System.out.println("2. Fazer login");
             System.out.println("3. Ler dados do usuário");
-            System.out.println("4. Fazer transação");
-            System.out.println("5. Sair");
+            System.out.println("4. Fazer transação (PIX)");
+            System.out.println("5. Ler transações por data");
+            System.out.println("6. Sair");
             System.out.print("Escolha uma opção: ");
 
             try {
                 int option = scanner.nextInt();
-                scanner.nextLine(); // Consome a quebra de linha
+                scanner.nextLine();
 
                 switch (option) {
                     case 1:
@@ -45,6 +49,9 @@ public class Client {
                         fazerTransacao(scanner);
                         break;
                     case 5:
+                        lerTransacoes(scanner);
+                        break;
+                    case 6:
                         System.out.println("Encerrando o cliente.");
                         return;
                     default:
@@ -52,7 +59,7 @@ public class Client {
                 }
             } catch (Exception e) {
                 System.err.println("Ocorreu um erro: " + e.getMessage());
-                scanner.nextLine(); // Limpa o buffer de entrada
+                scanner.nextLine();
             }
         }
     }
@@ -82,7 +89,6 @@ public class Client {
 
         HttpResponse<String> response = sendPostRequest("/usuario/login", requestBody);
         
-        // Processa o token de resposta
         if (response != null && response.statusCode() == 200) {
             String body = response.body();
             if (body.contains("\"status\":true")) {
@@ -114,12 +120,31 @@ public class Client {
         String cpfRecebedor = scanner.nextLine();
         System.out.print("Valor da transação: ");
         double valor = scanner.nextDouble();
-        scanner.nextLine(); // Consome a quebra de linha
+        scanner.nextLine();
 
-        String requestBody = String.format("{\"operacao\":\"transacao_criar\", \"token\":\"%s\", \"cpf\":\"%s\", \"valor\":%f}",
+        // O protocolo exige o campo "cpf_destino" para a criação de transação.
+        String requestBody = String.format("{\"operacao\":\"transacao_criar\", \"token\":\"%s\", \"cpf_destino\":\"%s\", \"valor\":%f}",
                 sessionToken, cpfRecebedor, valor);
 
         sendPostRequest("/transacao/criar", requestBody);
+    }
+
+    private static void lerTransacoes(Scanner scanner) throws Exception {
+        if (sessionToken == null) {
+            System.out.println("Faça o login primeiro.");
+            return;
+        }
+
+        System.out.print("Data de início (yyyy-MM-dd'T'HH:mm:ss'Z'): ");
+        String dataInicialStr = scanner.nextLine();
+        System.out.print("Data de fim (yyyy-MM-dd'T'HH:mm:ss'Z'): ");
+        String dataFinalStr = scanner.nextLine();
+
+        // O protocolo exige os campos "data_inicial" e "data_final" para a leitura de transações.
+        String requestBody = String.format("{\"operacao\":\"transacao_ler\", \"token\":\"%s\", \"data_inicial\":\"%s\", \"data_final\":\"%s\"}",
+                sessionToken, dataInicialStr, dataFinalStr);
+
+        sendPostRequest("/transacao/ler", requestBody);
     }
 
     private static HttpResponse<String> sendPostRequest(String path, String body) throws Exception {

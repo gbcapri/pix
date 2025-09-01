@@ -10,6 +10,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import spark.Spark;
 
+import java.sql.Connection;
+import java.time.LocalDateTime; // Adicionado para manipulação de datas
+import java.time.format.DateTimeFormatter; // Adicionado para formatação de datas
+import java.time.temporal.ChronoUnit; // Adicionado para calcular a diferença entre datas
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,11 +21,11 @@ import java.util.UUID;
 
 public class Server {
 
-    // Gerenciamento de tokens de sessão simples em memória.
     private static final Map<String, String> sessions = new HashMap<>();
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final UsuarioDAO usuarioDao = new UsuarioDAO();
     private static final TransacaoDAO transacaoDao = new TransacaoDAO();
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     public static void main(String[] args) {
         Spark.port(4567);
@@ -35,7 +39,6 @@ public class Server {
 
         System.out.println("Servidor Spark iniciado na porta 4567.");
 
-        // Rota para criar um novo usuário (usuario_criar)
         Spark.post("/usuario/criar", (req, res) -> {
             res.type("application/json");
             try {
@@ -45,7 +48,7 @@ public class Server {
                     rootNode.get("cpf").asText(),
                     rootNode.get("nome").asText(),
                     rootNode.get("senha").asText(),
-                    100.00 // Saldo inicial
+                    100.00
                 );
 
                 usuarioDao.criar(novoUsuario);
@@ -56,7 +59,6 @@ public class Server {
             }
         });
 
-        // Rota para login de usuário (usuario_login)
         Spark.post("/usuario/login", (req, res) -> {
             res.type("application/json");
             try {
@@ -69,7 +71,7 @@ public class Server {
 
                 if (usuario != null && usuario.getSenha().equals(senha)) {
                     String token = UUID.randomUUID().toString();
-                    sessions.put(token, cpf); // Associa o token ao CPF do usuário
+                    sessions.put(token, cpf);
                     
                     Map<String, Object> response = new HashMap<>();
                     response.put("operacao", "usuario_login");
@@ -85,7 +87,6 @@ public class Server {
             }
         });
 
-        // Rota para logout de usuário (usuario_logout)
         Spark.post("/usuario/logout", (req, res) -> {
             res.type("application/json");
             try {
@@ -100,7 +101,6 @@ public class Server {
             }
         });
 
-        // Rota para ler dados do usuário (usuario_ler)
         Spark.post("/usuario/ler", (req, res) -> {
             res.type("application/json");
             try {
@@ -122,14 +122,13 @@ public class Server {
                 response.put("operacao", "usuario_ler");
                 response.put("status", true);
                 response.put("info", "Dados do usuário recuperados com sucesso.");
-                response.put("usuario", usuario); // O Jackson serializará este objeto para JSON
+                response.put("usuario", usuario);
                 return objectMapper.writeValueAsString(response);
             } catch (Exception e) {
                 return createErrorResponse("usuario_ler", e.getMessage());
             }
         });
         
-        // Rota para atualizar dados do usuário (usuario_atualizar)
         Spark.post("/usuario/atualizar", (req, res) -> {
             res.type("application/json");
             try {
@@ -147,7 +146,6 @@ public class Server {
                     return createErrorResponse("usuario_atualizar", "Usuário não encontrado.");
                 }
                 
-                // Atualiza apenas os campos presentes na requisição
                 JsonNode usuarioNode = rootNode.get("usuario");
                 if (usuarioNode != null) {
                     if (usuarioNode.hasNonNull("nome")) {
@@ -165,7 +163,6 @@ public class Server {
             }
         });
         
-        // Rota para deletar um usuário (usuario_deletar)
         Spark.post("/usuario/deletar", (req, res) -> {
             res.type("application/json");
             try {
@@ -179,7 +176,7 @@ public class Server {
                 }
                 
                 usuarioDao.deletar(cpf);
-                sessions.remove(token); // Remove a sessão também
+                sessions.remove(token);
                 
                 return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
             } catch (Exception e) {
@@ -187,14 +184,14 @@ public class Server {
             }
         });
 
-        // Rota para criar uma transação (transacao_criar)
         Spark.post("/transacao/criar", (req, res) -> {
             res.type("application/json");
+            Connection conn = null;
             try {
                 Validator.validateClient(req.body());
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String token = rootNode.get("token").asText();
-                String cpfRecebedor = rootNode.get("cpf").asText();
+                String cpfRecebedor = rootNode.get("cpf_destino").asText();
                 double valor = rootNode.get("valor").asDouble();
                 
                 String cpfEnviador = sessions.get(token);
@@ -202,28 +199,43 @@ public class Server {
                     return createErrorResponse("transacao_criar", "Token de sessão inválido ou expirado.");
                 }
                 
-                // Lógica de transação: checa saldo e atualiza saldos
-                Usuario enviador = usuarioDao.ler(cpfEnviador);
-                Usuario recebedor = usuarioDao.ler(cpfRecebedor);
+                conn = DatabaseManager.getConnection();
+                conn.setAutoCommit(false);
+
+                Usuario enviador = usuarioDao.lerComConexao(conn, cpfEnviador);
+                Usuario recebedor = usuarioDao.lerComConexao(conn, cpfRecebedor);
                 
+                if (enviador == null || recebedor == null) {
+                    conn.rollback();
+                    return createErrorResponse("transacao_criar", "Usuário remetente ou recebedor não encontrado.");
+                }
+
                 if (enviador.getSaldo() < valor) {
+                    conn.rollback();
                     return createErrorResponse("transacao_criar", "Saldo insuficiente.");
                 }
                 
                 enviador.setSaldo(enviador.getSaldo() - valor);
                 recebedor.setSaldo(recebedor.getSaldo() + valor);
                 
-                // Atualiza saldos no banco de dados
-                usuarioDao.atualizar(enviador);
-                usuarioDao.atualizar(recebedor);
+                usuarioDao.atualizarComConexao(conn, enviador);
+                usuarioDao.atualizarComConexao(conn, recebedor);
                 
-                // Cria e salva a transação no banco de dados
                 Transacao novaTransacao = new Transacao(valor, cpfEnviador, cpfRecebedor);
-                transacaoDao.criar(novaTransacao);
+                transacaoDao.criarComConexao(conn, novaTransacao);
 
+                conn.commit();
+                
                 return createSuccessResponse("transacao_criar", "Transação realizada com sucesso.");
             } catch (Exception e) {
-                return createErrorResponse("transacao_criar", e.getMessage());
+                if (conn != null) {
+                    conn.rollback();
+                }
+                return createErrorResponse("transacao_criar", "Erro na transação: " + e.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.close();
+                }
             }
         });
 
@@ -234,15 +246,25 @@ public class Server {
                 Validator.validateClient(req.body());
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String token = rootNode.get("token").asText();
-                int pagina = rootNode.get("pagina").asInt();
-                int limite = rootNode.get("limite").asInt();
+                String dataInicialStr = rootNode.get("data_inicial").asText(); // Novo campo
+                String dataFinalStr = rootNode.get("data_final").asText();     // Novo campo
                 
+                // Valida o token
                 String cpf = sessions.get(token);
                 if (cpf == null) {
                     return createErrorResponse("transacao_ler", "Token de sessão inválido ou expirado.");
                 }
 
-                List<Transacao> transacoes = transacaoDao.lerPorCpf(cpf, pagina, limite);
+                // Parse e validação do intervalo de 31 dias
+                LocalDateTime dataInicial = LocalDateTime.parse(dataInicialStr, ISO_FORMATTER);
+                LocalDateTime dataFinal = LocalDateTime.parse(dataFinalStr, ISO_FORMATTER);
+
+                if (ChronoUnit.DAYS.between(dataInicial, dataFinal) > 31) {
+                    return createErrorResponse("transacao_ler", "O intervalo de datas não pode exceder 31 dias.");
+                }
+                
+                // Usa o novo método do DAO com os campos de data
+                List<Transacao> transacoes = transacaoDao.lerPorCpfComDatas(cpf, dataInicialStr, dataFinalStr);
                 
                 Map<String, Object> response = new HashMap<>();
                 response.put("operacao", "transacao_ler");
@@ -256,7 +278,6 @@ public class Server {
         });
     }
 
-    // Método utilitário para gerar respostas de sucesso.
     private static String createSuccessResponse(String operacao, String info) throws Exception {
         Map<String, Object> response = new HashMap<>();
         response.put("operacao", operacao);
@@ -265,7 +286,6 @@ public class Server {
         return objectMapper.writeValueAsString(response);
     }
     
-    // Método utilitário para gerar respostas de erro.
     private static String createErrorResponse(String operacao, String info) throws Exception {
         Map<String, Object> response = new HashMap<>();
         response.put("operacao", operacao);
