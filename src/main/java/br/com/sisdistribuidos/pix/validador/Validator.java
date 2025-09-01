@@ -143,14 +143,14 @@ public class Validator {
 
     private static void validateTransacaoCriarClient(JsonNode node) {
         validateStringLength(node, "token", 3, 200);
-        validateCpfFormat(node, "cpf");
+        validateCpfFormat(node, "cpf_destino");
         getRequiredNumber(node, "valor");
     }
 
     private static void validateTransacaoLerClient(JsonNode node) {
         validateStringLength(node, "token", 3, 200);
-        getRequiredInt(node, "pagina");
-        getRequiredInt(node, "limite");
+        validateDateFormat(node, "data_inicial"); 
+        validateDateFormat(node, "data_final");   
     }
 
     // ===================================================================================
@@ -176,12 +176,19 @@ public class Validator {
         for (JsonNode transacao : transacoesNode) {
             getRequiredInt(transacao, "id");
             getRequiredNumber(transacao, "valor_enviado");
+            
             JsonNode enviadorNode = getRequiredObject(transacao, "usuario_enviador");
             validateStringLength(enviadorNode, "nome", 6, 120);
             validateCpfFormat(enviadorNode, "cpf");
+            
             JsonNode recebedorNode = getRequiredObject(transacao, "usuario_recebedor");
             validateStringLength(recebedorNode, "nome", 6, 120);
             validateCpfFormat(recebedorNode, "cpf");
+
+            // <-- ADICIONADO
+            validateDateFormat(transacao, "criado_em");
+            validateDateFormat(transacao, "atualizado_em");
+            // -->
         }
     }
 
@@ -232,6 +239,18 @@ public class Validator {
         String cpfRegex = "\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}";
         if (!cpf.matches(cpfRegex)) {
             throw new IllegalArgumentException("O campo '" + fieldName + "' deve estar no formato '000.000.000-00'.");
+        }
+    }
+
+    private static void validateDateFormat(JsonNode parentNode, String fieldName) {
+        JsonNode field = getRequiredField(parentNode, fieldName);
+        if (!field.isTextual()) {
+            throw new IllegalArgumentException("O campo '" + fieldName + "' deve ser do tipo String.");
+        }
+        String date = field.asText();
+        String isoRegex = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z";
+        if (!date.matches(isoRegex)) {
+            throw new IllegalArgumentException("O campo '" + fieldName + "' deve estar no formato ISO 8601 UTC 'yyyy-MM-dd'T'HH:mm:ss'Z'.");
         }
     }
     
