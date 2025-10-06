@@ -13,6 +13,7 @@ public class Client {
 
     private static final String SERVER_URL = "http://localhost:4567";
     private static String sessionToken = null;
+    private static String loggedInUserCpf = null; // Novo campo para o CPF logado
     private static final HttpClient client = HttpClient.newHttpClient();
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
@@ -23,8 +24,15 @@ public class Client {
         Scanner scanner = new Scanner(System.in);
         while (true) {
             System.out.println("\n--- Menu do Cliente ---");
-            System.out.println("1. Criar usuário");
-            System.out.println("2. Fazer login");
+            if (sessionToken != null) {
+                System.out.println("  *** LOGADO: " + loggedInUserCpf + " ***"); // Exibe o status
+                System.out.println("1. Criar usuário");
+                System.out.println("2. Fazer LOGOUT"); // Opção 2 vira LOGOUT
+            } else {
+                System.out.println("1. Criar usuário");
+                System.out.println("2. Fazer login"); // Opção 2 vira LOGIN
+            }
+            
             System.out.println("3. Ler dados do usuário");
             System.out.println("4. Fazer transação (PIX)");
             System.out.println("5. Ler transações por data");
@@ -35,6 +43,11 @@ public class Client {
                 int option = scanner.nextInt();
                 scanner.nextLine();
 
+                if (option == 2 && sessionToken != null) {
+                    fazerLogout();
+                    continue;
+                }
+                
                 switch (option) {
                     case 1:
                         criarUsuario(scanner);
@@ -64,7 +77,21 @@ public class Client {
         }
     }
 
+    private static void fazerLogout() throws Exception {
+        String requestBody = String.format("{\"operacao\":\"usuario_logout\", \"token\":\"%s\"}", sessionToken);
+        HttpResponse<String> response = sendPostRequest("/usuario/logout", requestBody);
+        
+        // Limpa a sessão local independentemente da resposta do servidor
+        if (response != null && response.statusCode() == 200) {
+            sessionToken = null;
+            loggedInUserCpf = null;
+            System.out.println("Sessão limpa. Usuário desconectado.");
+        }
+    }
+
     private static void criarUsuario(Scanner scanner) throws Exception {
+        // ... (código de criarUsuario)
+        // ... (código de criarUsuario)
         System.out.print("Nome: ");
         String nome = scanner.nextLine();
         System.out.print("CPF: ");
@@ -95,6 +122,7 @@ public class Client {
                 int tokenStart = body.indexOf("\"token\":\"") + 9;
                 int tokenEnd = body.indexOf("\"", tokenStart);
                 sessionToken = body.substring(tokenStart, tokenEnd);
+                loggedInUserCpf = cpf; // Armazena o CPF no login
                 System.out.println("Login bem-sucedido. Token de sessão: " + sessionToken);
             }
         }
@@ -122,7 +150,6 @@ public class Client {
         double valor = scanner.nextDouble();
         scanner.nextLine();
 
-        // O protocolo exige o campo "cpf_destino" para a criação de transação.
         String requestBody = String.format("{\"operacao\":\"transacao_criar\", \"token\":\"%s\", \"cpf_destino\":\"%s\", \"valor\":%f}",
                 sessionToken, cpfRecebedor, valor);
 
@@ -140,7 +167,6 @@ public class Client {
         System.out.print("Data de fim (yyyy-MM-dd'T'HH:mm:ss'Z'): ");
         String dataFinalStr = scanner.nextLine();
 
-        // O protocolo exige os campos "data_inicial" e "data_final" para a leitura de transações.
         String requestBody = String.format("{\"operacao\":\"transacao_ler\", \"token\":\"%s\", \"data_inicial\":\"%s\", \"data_final\":\"%s\"}",
                 sessionToken, dataInicialStr, dataFinalStr);
 

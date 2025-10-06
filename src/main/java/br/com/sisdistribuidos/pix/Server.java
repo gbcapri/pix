@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import spark.Spark;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.LocalDateTime; // Adicionado para manipulação de datas
 import java.time.format.DateTimeFormatter; // Adicionado para formatação de datas
 import java.time.temporal.ChronoUnit; // Adicionado para calcular a diferença entre datas
@@ -30,15 +31,18 @@ public class Server {
     public static void main(String[] args) {
         Spark.port(4567);
 
+        // NOVO BLOCO: Inicializa o BD APENAS uma vez antes de iniciar o Spark.
         try {
-            DatabaseManager.getConnection();
+            DatabaseManager.initialize();
         } catch (Exception e) {
-            System.err.println("Erro ao conectar com o banco de dados: " + e.getMessage());
-            return;
+            System.err.println("Erro FATAL na inicialização do banco de dados: " + e.getMessage());
+            return; // Não inicia o servidor se o BD falhar
         }
+
 
         System.out.println("Servidor Spark iniciado na porta 4567.");
 
+        // Rota para criar um novo usuário (usuario_criar)
         Spark.post("/usuario/criar", (req, res) -> {
             res.type("application/json");
             try {
@@ -59,6 +63,7 @@ public class Server {
             }
         });
 
+        // Rota para login de usuário (usuario_login)
         Spark.post("/usuario/login", (req, res) -> {
             res.type("application/json");
             try {
@@ -83,10 +88,12 @@ public class Server {
                     return createErrorResponse("usuario_login", "CPF ou senha inválidos.");
                 }
             } catch (Exception e) {
+                e.printStackTrace(System.err);
                 return createErrorResponse("usuario_login", e.getMessage());
             }
         });
 
+        // Rota para logout de usuário (usuario_logout)
         Spark.post("/usuario/logout", (req, res) -> {
             res.type("application/json");
             try {
@@ -101,6 +108,7 @@ public class Server {
             }
         });
 
+        // Rota para ler dados do usuário (usuario_ler)
         Spark.post("/usuario/ler", (req, res) -> {
             res.type("application/json");
             try {
@@ -129,6 +137,7 @@ public class Server {
             }
         });
         
+        // Rota para atualizar dados do usuário (usuario_atualizar)
         Spark.post("/usuario/atualizar", (req, res) -> {
             res.type("application/json");
             try {
@@ -163,6 +172,7 @@ public class Server {
             }
         });
         
+        // Rota para deletar um usuário (usuario_deletar)
         Spark.post("/usuario/deletar", (req, res) -> {
             res.type("application/json");
             try {
@@ -184,6 +194,7 @@ public class Server {
             }
         });
 
+        // Rota para criar uma transação (transacao_criar)
         Spark.post("/transacao/criar", (req, res) -> {
             res.type("application/json");
             Connection conn = null;
@@ -193,48 +204,72 @@ public class Server {
                 String token = rootNode.get("token").asText();
                 String cpfRecebedor = rootNode.get("cpf_destino").asText();
                 double valor = rootNode.get("valor").asDouble();
-                
+
                 String cpfEnviador = sessions.get(token);
                 if (cpfEnviador == null) {
                     return createErrorResponse("transacao_criar", "Token de sessão inválido ou expirado.");
                 }
-                
-                conn = DatabaseManager.getConnection();
+
+                conn = DatabaseManager.getConnection(); // NOVA CONEXÃO THREAD-SAFE
                 conn.setAutoCommit(false);
 
                 Usuario enviador = usuarioDao.lerComConexao(conn, cpfEnviador);
                 Usuario recebedor = usuarioDao.lerComConexao(conn, cpfRecebedor);
-                
-                if (enviador == null || recebedor == null) {
+
+                // --- VERIFICAÇÃO DE EXISTÊNCIA (RETORNA ERRO SEM THROW) ---
+                if (enviador == null) {
                     conn.rollback();
-                    return createErrorResponse("transacao_criar", "Usuário remetente ou recebedor não encontrado.");
+                    return createErrorResponse("transacao_criar", "Usuário Remetente (" + cpfEnviador + ") não encontrado.");
                 }
+
+                if (recebedor == null) {
+                    conn.rollback();
+                    return createErrorResponse("transacao_criar", "Usuário Recebedor (" + cpfRecebedor + ") não encontrado.");
+                }
+                // --- FIM DA VERIFICAÇÃO PURA ---
 
                 if (enviador.getSaldo() < valor) {
                     conn.rollback();
                     return createErrorResponse("transacao_criar", "Saldo insuficiente.");
                 }
-                
+
                 enviador.setSaldo(enviador.getSaldo() - valor);
                 recebedor.setSaldo(recebedor.getSaldo() + valor);
-                
+
                 usuarioDao.atualizarComConexao(conn, enviador);
                 usuarioDao.atualizarComConexao(conn, recebedor);
-                
+
                 Transacao novaTransacao = new Transacao(valor, cpfEnviador, cpfRecebedor);
                 transacaoDao.criarComConexao(conn, novaTransacao);
 
                 conn.commit();
-                
+
                 return createSuccessResponse("transacao_criar", "Transação realizada com sucesso.");
             } catch (Exception e) {
+                // Bloco de tratamento de exceção FINAL
                 if (conn != null) {
-                    conn.rollback();
+                    try {
+                        conn.rollback();
+                    } catch (SQLException rollbackEx) {
+                        rollbackEx.printStackTrace(System.err);
+                    }
                 }
-                return createErrorResponse("transacao_criar", "Erro na transação: " + e.getMessage());
+
+                // Imprime o erro para diagnóstico (último recurso)
+                System.err.println("Exceção na Transação: " + e.getMessage());
+                e.printStackTrace(System.err);
+
+                String errorMessage = (e.getMessage() != null) ? e.getMessage() : "Erro interno desconhecido.";
+                return createErrorResponse("transacao_criar", "Falha: " + errorMessage);
+
             } finally {
+                // ÚNICO LUGAR ONDE A CONEXÃO É FECHADA
                 if (conn != null) {
-                    conn.close();
+                    try {
+                        conn.close();
+                    } catch (SQLException ex) {
+                        ex.printStackTrace(System.err);
+                    }
                 }
             }
         });
