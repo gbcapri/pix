@@ -5,16 +5,16 @@ import br.com.sisdistribuidos.pix.database.TransacaoDAO;
 import br.com.sisdistribuidos.pix.database.UsuarioDAO;
 import br.com.sisdistribuidos.pix.model.Transacao;
 import br.com.sisdistribuidos.pix.model.Usuario;
-import br.com.sisdistribuidos.pix.validador.Validator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import spark.Spark;
+import validador.Validator;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.time.LocalDateTime; // Adicionado para manipulação de datas
-import java.time.format.DateTimeFormatter; // Adicionado para formatação de datas
-import java.time.temporal.ChronoUnit; // Adicionado para calcular a diferença entre datas
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,18 +31,20 @@ public class Server {
     public static void main(String[] args) {
         Spark.port(4567);
 
-        // NOVO BLOCO: Inicializa o BD APENAS uma vez antes de iniciar o Spark.
         try {
             DatabaseManager.initialize();
         } catch (Exception e) {
             System.err.println("Erro FATAL na inicialização do banco de dados: " + e.getMessage());
-            return; // Não inicia o servidor se o BD falhar
+            return;
         }
-
 
         System.out.println("Servidor Spark iniciado na porta 4567.");
 
-        // Rota para criar um novo usuário (usuario_criar)
+        setupUserRoutes();
+        setupTransactionRoutes();
+    }
+
+    private static void setupUserRoutes() {
         Spark.post("/usuario/criar", (req, res) -> {
             res.type("application/json");
             try {
@@ -54,16 +56,14 @@ public class Server {
                     rootNode.get("senha").asText(),
                     100.00
                 );
-
                 usuarioDao.criar(novoUsuario);
-                
                 return createSuccessResponse("usuario_criar", "Usuário criado com sucesso.");
             } catch (Exception e) {
+                System.err.println("ERRO em [usuario_criar]: " + e.getMessage());
                 return createErrorResponse("usuario_criar", e.getMessage());
             }
         });
 
-        // Rota para login de usuário (usuario_login)
         Spark.post("/usuario/login", (req, res) -> {
             res.type("application/json");
             try {
@@ -71,13 +71,11 @@ public class Server {
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String cpf = rootNode.get("cpf").asText();
                 String senha = rootNode.get("senha").asText();
-
                 Usuario usuario = usuarioDao.ler(cpf);
 
                 if (usuario != null && usuario.getSenha().equals(senha)) {
                     String token = UUID.randomUUID().toString();
                     sessions.put(token, cpf);
-                    
                     Map<String, Object> response = new HashMap<>();
                     response.put("operacao", "usuario_login");
                     response.put("status", true);
@@ -88,44 +86,47 @@ public class Server {
                     return createErrorResponse("usuario_login", "CPF ou senha inválidos.");
                 }
             } catch (Exception e) {
-                e.printStackTrace(System.err);
+                System.err.println("ERRO em [usuario_login]: " + e.getMessage());
                 return createErrorResponse("usuario_login", e.getMessage());
             }
         });
 
-        // Rota para logout de usuário (usuario_logout)
+        // NOVA ROTA DE LOGOUT
         Spark.post("/usuario/logout", (req, res) -> {
             res.type("application/json");
             try {
                 Validator.validateClient(req.body());
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String token = rootNode.get("token").asText();
-
-                sessions.remove(token);
-                return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
+                
+                if (sessions.remove(token) != null) {
+                    return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
+                } else {
+                    return createErrorResponse("usuario_logout", "Token inválido ou sessão já encerrada.");
+                }
             } catch (Exception e) {
+                System.err.println("ERRO em [usuario_logout]: " + e.getMessage());
                 return createErrorResponse("usuario_logout", e.getMessage());
             }
         });
 
-        // Rota para ler dados do usuário (usuario_ler)
         Spark.post("/usuario/ler", (req, res) -> {
             res.type("application/json");
             try {
                 Validator.validateClient(req.body());
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String token = rootNode.get("token").asText();
-                
                 String cpf = sessions.get(token);
                 if (cpf == null) {
                     return createErrorResponse("usuario_ler", "Token de sessão inválido ou expirado.");
                 }
-                
                 Usuario usuario = usuarioDao.ler(cpf);
                 if (usuario == null) {
                     return createErrorResponse("usuario_ler", "Usuário não encontrado.");
                 }
                 
+                usuario.setSenha(null);
+
                 Map<String, Object> response = new HashMap<>();
                 response.put("operacao", "usuario_ler");
                 response.put("status", true);
@@ -133,11 +134,12 @@ public class Server {
                 response.put("usuario", usuario);
                 return objectMapper.writeValueAsString(response);
             } catch (Exception e) {
+                System.err.println("ERRO em [usuario_ler]: " + e.getMessage());
                 return createErrorResponse("usuario_ler", e.getMessage());
             }
         });
-        
-        // Rota para atualizar dados do usuário (usuario_atualizar)
+
+        // NOVA ROTA DE ATUALIZAÇÃO
         Spark.post("/usuario/atualizar", (req, res) -> {
             res.type("application/json");
             try {
@@ -156,23 +158,28 @@ public class Server {
                 }
                 
                 JsonNode usuarioNode = rootNode.get("usuario");
-                if (usuarioNode != null) {
-                    if (usuarioNode.hasNonNull("nome")) {
-                        usuarioExistente.setNome(usuarioNode.get("nome").asText());
-                    }
-                    if (usuarioNode.hasNonNull("senha")) {
-                        usuarioExistente.setSenha(usuarioNode.get("senha").asText());
-                    }
+                boolean updated = false;
+                if (usuarioNode.hasNonNull("nome")) {
+                    usuarioExistente.setNome(usuarioNode.get("nome").asText());
+                    updated = true;
                 }
-                usuarioDao.atualizar(usuarioExistente);
+                if (usuarioNode.hasNonNull("senha")) {
+                    usuarioExistente.setSenha(usuarioNode.get("senha").asText());
+                    updated = true;
+                }
+
+                if (updated) {
+                    usuarioDao.atualizar(usuarioExistente);
+                }
                 
                 return createSuccessResponse("usuario_atualizar", "Usuário atualizado com sucesso.");
             } catch (Exception e) {
+                System.err.println("ERRO em [usuario_atualizar]: " + e.getMessage());
                 return createErrorResponse("usuario_atualizar", e.getMessage());
             }
         });
-        
-        // Rota para deletar um usuário (usuario_deletar)
+
+        // NOVA ROTA PARA DELETAR
         Spark.post("/usuario/deletar", (req, res) -> {
             res.type("application/json");
             try {
@@ -186,15 +193,45 @@ public class Server {
                 }
                 
                 usuarioDao.deletar(cpf);
-                sessions.remove(token);
+                sessions.remove(token); // Remove a sessão após deletar
                 
                 return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
             } catch (Exception e) {
+                System.err.println("ERRO em [usuario_deletar]: " + e.getMessage());
                 return createErrorResponse("usuario_deletar", e.getMessage());
             }
         });
 
-        // Rota para criar uma transação (transacao_criar)
+        Spark.post("/usuario/depositar", (req, res) -> {
+            res.type("application/json");
+            try {
+                Validator.validateClient(req.body());
+                JsonNode rootNode = objectMapper.readTree(req.body());
+                String token = rootNode.get("token").asText();
+                double valor = rootNode.get("valor_enviado").asDouble();
+
+                String cpf = sessions.get(token);
+                if (cpf == null) {
+                    return createErrorResponse("depositar", "Token de sessão inválido ou expirado.");
+                }
+                
+                Usuario usuario = usuarioDao.ler(cpf);
+                if (usuario == null) {
+                     return createErrorResponse("depositar", "Usuário não encontrado.");
+                }
+
+                usuario.setSaldo(usuario.getSaldo() + valor);
+                usuarioDao.atualizar(usuario);
+                
+                return createSuccessResponse("depositar", "Depósito de R$" + valor + " realizado com sucesso.");
+            } catch (Exception e) {
+                System.err.println("ERRO em [depositar]: " + e.getMessage());
+                return createErrorResponse("depositar", e.getMessage());
+            }
+        });
+    }
+
+    private static void setupTransactionRoutes() {
         Spark.post("/transacao/criar", (req, res) -> {
             res.type("application/json");
             Connection conn = null;
@@ -204,103 +241,63 @@ public class Server {
                 String token = rootNode.get("token").asText();
                 String cpfRecebedor = rootNode.get("cpf_destino").asText();
                 double valor = rootNode.get("valor").asDouble();
-
                 String cpfEnviador = sessions.get(token);
+
                 if (cpfEnviador == null) {
                     return createErrorResponse("transacao_criar", "Token de sessão inválido ou expirado.");
                 }
 
-                conn = DatabaseManager.getConnection(); // NOVA CONEXÃO THREAD-SAFE
+                conn = DatabaseManager.getConnection();
                 conn.setAutoCommit(false);
 
                 Usuario enviador = usuarioDao.lerComConexao(conn, cpfEnviador);
                 Usuario recebedor = usuarioDao.lerComConexao(conn, cpfRecebedor);
 
-                // --- VERIFICAÇÃO DE EXISTÊNCIA (RETORNA ERRO SEM THROW) ---
-                if (enviador == null) {
+                if (enviador == null || recebedor == null || enviador.getSaldo() < valor) {
                     conn.rollback();
-                    return createErrorResponse("transacao_criar", "Usuário Remetente (" + cpfEnviador + ") não encontrado.");
-                }
-
-                if (recebedor == null) {
-                    conn.rollback();
-                    return createErrorResponse("transacao_criar", "Usuário Recebedor (" + cpfRecebedor + ") não encontrado.");
-                }
-                // --- FIM DA VERIFICAÇÃO PURA ---
-
-                if (enviador.getSaldo() < valor) {
-                    conn.rollback();
-                    return createErrorResponse("transacao_criar", "Saldo insuficiente.");
+                    String motivo = enviador == null ? "Remetente não encontrado." : (recebedor == null ? "Destinatário não encontrado." : "Saldo insuficiente.");
+                    return createErrorResponse("transacao_criar", motivo);
                 }
 
                 enviador.setSaldo(enviador.getSaldo() - valor);
                 recebedor.setSaldo(recebedor.getSaldo() + valor);
-
                 usuarioDao.atualizarComConexao(conn, enviador);
                 usuarioDao.atualizarComConexao(conn, recebedor);
-
+                
                 Transacao novaTransacao = new Transacao(valor, cpfEnviador, cpfRecebedor);
                 transacaoDao.criarComConexao(conn, novaTransacao);
-
                 conn.commit();
 
                 return createSuccessResponse("transacao_criar", "Transação realizada com sucesso.");
             } catch (Exception e) {
-                // Bloco de tratamento de exceção FINAL
-                if (conn != null) {
-                    try {
-                        conn.rollback();
-                    } catch (SQLException rollbackEx) {
-                        rollbackEx.printStackTrace(System.err);
-                    }
-                }
-
-                // Imprime o erro para diagnóstico (último recurso)
-                System.err.println("Exceção na Transação: " + e.getMessage());
-                e.printStackTrace(System.err);
-
-                String errorMessage = (e.getMessage() != null) ? e.getMessage() : "Erro interno desconhecido.";
-                return createErrorResponse("transacao_criar", "Falha: " + errorMessage);
-
+                if (conn != null) { try { conn.rollback(); } catch (SQLException ignored) {} }
+                System.err.println("ERRO em [transacao_criar]: " + e.getMessage());
+                return createErrorResponse("transacao_criar", "Falha na transação: " + e.getMessage());
             } finally {
-                // ÚNICO LUGAR ONDE A CONEXÃO É FECHADA
-                if (conn != null) {
-                    try {
-                        conn.close();
-                    } catch (SQLException ex) {
-                        ex.printStackTrace(System.err);
-                    }
-                }
+                if (conn != null) { try { conn.close(); } catch (SQLException ignored) {} }
             }
         });
 
-        // Rota para ler transações (transacao_ler)
         Spark.post("/transacao/ler", (req, res) -> {
             res.type("application/json");
             try {
                 Validator.validateClient(req.body());
                 JsonNode rootNode = objectMapper.readTree(req.body());
                 String token = rootNode.get("token").asText();
-                String dataInicialStr = rootNode.get("data_inicial").asText(); // Novo campo
-                String dataFinalStr = rootNode.get("data_final").asText();     // Novo campo
-                
-                // Valida o token
+                String dataInicialStr = rootNode.get("data_inicial").asText();
+                String dataFinalStr = rootNode.get("data_final").asText();
                 String cpf = sessions.get(token);
                 if (cpf == null) {
                     return createErrorResponse("transacao_ler", "Token de sessão inválido ou expirado.");
                 }
 
-                // Parse e validação do intervalo de 31 dias
                 LocalDateTime dataInicial = LocalDateTime.parse(dataInicialStr, ISO_FORMATTER);
                 LocalDateTime dataFinal = LocalDateTime.parse(dataFinalStr, ISO_FORMATTER);
-
                 if (ChronoUnit.DAYS.between(dataInicial, dataFinal) > 31) {
                     return createErrorResponse("transacao_ler", "O intervalo de datas não pode exceder 31 dias.");
                 }
-                
-                // Usa o novo método do DAO com os campos de data
+
                 List<Transacao> transacoes = transacaoDao.lerPorCpfComDatas(cpf, dataInicialStr, dataFinalStr);
-                
                 Map<String, Object> response = new HashMap<>();
                 response.put("operacao", "transacao_ler");
                 response.put("status", true);
@@ -308,24 +305,17 @@ public class Server {
                 response.put("transacoes", transacoes);
                 return objectMapper.writeValueAsString(response);
             } catch (Exception e) {
+                System.err.println("ERRO em [transacao_ler]: " + e.getMessage());
                 return createErrorResponse("transacao_ler", e.getMessage());
             }
         });
     }
 
     private static String createSuccessResponse(String operacao, String info) throws Exception {
-        Map<String, Object> response = new HashMap<>();
-        response.put("operacao", operacao);
-        response.put("status", true);
-        response.put("info", info);
-        return objectMapper.writeValueAsString(response);
+        return objectMapper.writeValueAsString(Map.of("operacao", operacao, "status", true, "info", info));
     }
-    
+
     private static String createErrorResponse(String operacao, String info) throws Exception {
-        Map<String, Object> response = new HashMap<>();
-        response.put("operacao", operacao);
-        response.put("status", false);
-        response.put("info", info);
-        return objectMapper.writeValueAsString(response);
+        return objectMapper.writeValueAsString(Map.of("operacao", operacao, "status", false, "info", info));
     }
 }
