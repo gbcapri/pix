@@ -1,4 +1,4 @@
-package br.com.sisdistribuidos.pix.validador;
+package validador;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,6 +25,7 @@ public class Validator {
         validateStringLength(rootNode, "operacao", 3, 200); // Operacao também é uma string
 
         // Converte a string da operação para o nosso Enum
+        // NOTA: Certifique-se de que o RulesEnum.java contenha a operação DEPOSITAR.
         RulesEnum operacao = RulesEnum.getEnum(operacaoNode.asText());
 
         // Chama o método de validação específico para a operação
@@ -53,6 +54,10 @@ public class Validator {
             case TRANSACAO_LER:
                 validateTransacaoLerClient(rootNode);
                 break;
+            case DEPOSITAR:
+                validateDepositarClient(rootNode);
+                break;
+            // =======================================================
             default:
                 throw new IllegalArgumentException("Operação do cliente desconhecida ou não suportada: " + operacao);
         }
@@ -92,7 +97,8 @@ public class Validator {
                 case TRANSACAO_LER:
                     validateTransacaoLerServer(rootNode);
                     break;
-                // Outras operações de sucesso não retornam dados adicionais, então não precisam de validação extra.
+                // Outras operações de sucesso (como criar, atualizar, deletar e depositar)
+                // não retornam dados adicionais, então não precisam de validação extra.
                 default:
                     break; 
             }
@@ -153,6 +159,12 @@ public class Validator {
         validateDateFormat(node, "data_final");   
     }
 
+    private static void validateDepositarClient(JsonNode node) {
+        validateStringLength(node, "token", 3, 200);
+        getRequiredNumber(node, "valor_enviado");
+    }
+    // =======================================================
+
     // ===================================================================================
     // MÉTODOS DE VALIDAÇÃO PRIVADOS (SERVIDOR -> CLIENTE)
     // ===================================================================================
@@ -185,10 +197,8 @@ public class Validator {
             validateStringLength(recebedorNode, "nome", 6, 120);
             validateCpfFormat(recebedorNode, "cpf");
 
-            // <-- ADICIONADO
             validateDateFormat(transacao, "criado_em");
             validateDateFormat(transacao, "atualizado_em");
-            // -->
         }
     }
 

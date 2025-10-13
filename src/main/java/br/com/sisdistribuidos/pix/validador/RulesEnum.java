@@ -1,8 +1,10 @@
-package br.com.sisdistribuidos.pix.validador;
+package validador;
 
 import java.util.Objects;
 
 public enum RulesEnum {
+    // Conectar
+    CONECTAR("conectar"),
     // Login e Logoff
     USUARIO_LOGIN("usuario_login"),
     USUARIO_LOGOUT("usuario_logout"),
@@ -13,7 +15,8 @@ public enum RulesEnum {
     USUARIO_DELETAR("usuario_deletar"),
     // CR(UD) da transação
     TRANSACAO_CRIAR("transacao_criar"),
-    TRANSACAO_LER("transacao_ler"); // É literalmente o envio de um 'getTransacao()' para o servidor, porém os parâmetros influenciam
+    TRANSACAO_LER("transacao_ler"), // É literalmente o envio de um 'getTransacao()' para o servidor, porém os parâmetros influenciam
+    DEPOSITAR("depositar");
 
     RulesEnum(String rule) {
         this.rule = rule;
