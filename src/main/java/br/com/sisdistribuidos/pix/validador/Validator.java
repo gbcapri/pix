@@ -1,4 +1,4 @@
-package validador;
+package br.com.sisdistribuidos.pix.validador;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
