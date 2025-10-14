@@ -1,4 +1,4 @@
-package validador;
+package br.com.sisdistribuidos.pix.validador;
 
 import java.util.Objects;
 
