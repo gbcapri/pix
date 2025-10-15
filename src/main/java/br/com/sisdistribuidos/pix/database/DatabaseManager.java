@@ -25,7 +25,7 @@ public class DatabaseManager {
             try (Connection conn = getConnection()) {
                 createTables(conn);
                 tablesInitialized = true;
-                System.out.println("Banco de dados SQLite inicializado com sucesso.");
+                System.out.println("Banco de dados inicializado com sucesso.");
             } catch (SQLException e) {
                 System.err.println("Falha na inicialização do banco de dados: " + e.getMessage());
                 throw e;

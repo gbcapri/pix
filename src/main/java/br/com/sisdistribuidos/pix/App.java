@@ -19,7 +19,7 @@ public class App {
             // Exemplo de criação de usuário
             // Para evitar erros de "chave duplicada", pode apagar o BD (o ficheiro .db) antes de executar
             System.out.println("\nTentando criar um novo usuário...");
-            Usuario novoUsuario = new Usuario("123.456.789-00", "Gabriel Pereira Neves", "senhaSegura123", 1000.00);
+            Usuario novoUsuario = new Usuario("123.456.789-00", "Gabriel", "senhaSegura123", 1000.00);
             usuarioDao.criar(novoUsuario);
             System.out.println("Usuário criado com sucesso!");
             

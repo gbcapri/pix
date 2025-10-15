@@ -12,11 +12,9 @@ import java.util.Scanner;
 
 public class Server {
     public static void main(String[] args) {
-        // --- INÍCIO DA MUDANÇA ---
         Scanner scanner = new Scanner(System.in);
         System.out.print("Digite a porta para iniciar o servidor: ");
         int port = Integer.parseInt(scanner.nextLine());
-        // --- FIM DA MUDANÇA ---
 
         try {
             DatabaseManager.initialize();
@@ -29,7 +27,7 @@ public class Server {
         ExecutorService pool = Executors.newCachedThreadPool();
 
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("Servidor TCP iniciado na porta " + port);
+            System.out.println("Servidor iniciado na porta " + port);
             System.out.println("Aguardando conexões de clientes...");
 
             while (true) {
