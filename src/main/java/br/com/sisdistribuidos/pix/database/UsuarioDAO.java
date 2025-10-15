@@ -8,10 +8,6 @@ import java.sql.SQLException;
 
 public class UsuarioDAO {
 
-    // -----------------------------------------------------------
-    // MÉTODOS PÚBLICOS DE OPERAÇÃO
-    // -----------------------------------------------------------
-
     public void criar(Usuario usuario) throws SQLException {
         String sql = "INSERT INTO usuario (cpf, nome, senha, saldo) VALUES (?, ?, ?, ?)";
         try (Connection conn = DatabaseManager.getConnection();
@@ -19,9 +15,8 @@ public class UsuarioDAO {
             stmt.setString(1, usuario.getCpf());
             stmt.setString(2, usuario.getNome());
             stmt.setString(3, usuario.getSenha());
-            stmt.setDouble(4, usuario.getSaldo());
+            stmt.setDouble(4, usuario.getSaldo()); 
             stmt.executeUpdate();
-            System.out.println("Usuário criado com sucesso: " + usuario.getCpf());
         }
     }
 
@@ -84,17 +79,12 @@ public class UsuarioDAO {
         }
     }
 
-    // -----------------------------------------------------------
-    // MÉTODO AUXILIAR PRIVADO
-    // -----------------------------------------------------------
-
     private Usuario buildUsuarioFromResultSet(ResultSet rs) throws SQLException {
         if (rs.next()) {
             Usuario usuario = new Usuario();
             usuario.setCpf(rs.getString("cpf"));
             usuario.setNome(rs.getString("nome"));
             usuario.setSenha(rs.getString("senha"));
-            // Esta é a linha crítica corrigida para o PostgreSQL.
             usuario.setSaldo(rs.getFloat("saldo")); 
             return usuario;
         }

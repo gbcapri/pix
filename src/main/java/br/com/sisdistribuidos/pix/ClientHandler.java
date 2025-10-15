@@ -15,9 +15,6 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +24,7 @@ public class ClientHandler implements Runnable {
     private final Socket clientSocket;
     private final ObjectMapper objectMapper;
     private final UsuarioDAO usuarioDao;
-    private final TransacaoDAO transacaoDao; // <-- Adicionado
+    private final TransacaoDAO transacaoDao;
 
     private static final Map<String, String> sessions = new HashMap<>();
 
@@ -35,7 +32,7 @@ public class ClientHandler implements Runnable {
         this.clientSocket = socket;
         this.objectMapper = new ObjectMapper();
         this.usuarioDao = new UsuarioDAO();
-        this.transacaoDao = new TransacaoDAO(); // <-- Adicionado
+        this.transacaoDao = new TransacaoDAO();
     }
 
     @Override
@@ -44,6 +41,22 @@ public class ClientHandler implements Runnable {
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
         ) {
+            String firstLine = in.readLine();
+            if (firstLine == null) return;
+            System.out.println("Servidor recebeu: " + firstLine);
+
+            JsonNode firstNode = objectMapper.readTree(firstLine);
+            if (!firstNode.path("operacao").asText().equals("conectar")) {
+                String errorResponse = createErrorResponse("conectar", "Protocolo violado: a primeira operação deve ser 'conectar'.");
+                System.out.println("Servidor enviou: " + errorResponse);
+                out.println(errorResponse);
+                return;
+            }
+
+            String successResponse = createSuccessResponse("conectar", "Conexão estabelecida com sucesso.");
+            System.out.println("Servidor enviou: " + successResponse);
+            out.println(successResponse);
+
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
                 System.out.println("Servidor recebeu: " + inputLine);
@@ -51,15 +64,13 @@ public class ClientHandler implements Runnable {
                 System.out.println("Servidor enviou: " + response);
                 out.println(response);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("Erro na comunicação com o cliente: " + e.getMessage());
         } finally {
             try {
                 clientSocket.close();
                 System.out.println("Cliente desconectado: " + clientSocket.getInetAddress().getHostAddress());
-            } catch (IOException e) {
-                // Ignorar
-            }
+            } catch (IOException e) { /* Ignorar */ }
         }
     }
 
@@ -69,38 +80,32 @@ public class ClientHandler implements Runnable {
             String operacao = rootNode.get("operacao").asText();
 
             switch (operacao) {
-                case "usuario_criar":
-                    return handleCriarUsuario(rootNode);
-                case "usuario_login":
-                    return handleLogin(rootNode);
-                case "usuario_logout":
-                    return handleLogout(rootNode);
-                case "usuario_ler":
-                    return handleLerUsuario(rootNode);
-                case "usuario_atualizar":
-                    return handleAtualizarUsuario(rootNode);
-                case "usuario_deletar":
-                    return handleDeletarUsuario(rootNode);
-                // OPERAÇÕES RESTAURADAS
-                case "transacao_criar":
-                    return handleCriarTransacao(rootNode);
-                case "transacao_ler":
-                    return handleLerTransacoes(rootNode);
-                default:
-                    return createErrorResponse("desconhecida", "Operação não reconhecida.");
+                case "usuario_criar": return handleCriarUsuario(rootNode);
+                case "usuario_login": return handleLogin(rootNode);
+                case "usuario_logout": return handleLogout(rootNode);
+                case "usuario_ler": return handleLerUsuario(rootNode);
+                case "usuario_atualizar": return handleAtualizarUsuario(rootNode);
+                case "usuario_deletar": return handleDeletarUsuario(rootNode);
+                case "transacao_criar": return handleCriarTransacao(rootNode);
+                case "transacao_ler": return handleLerTransacoes(rootNode);
+                default: return createErrorResponse("desconhecida", "Operação não reconhecida.");
             }
         } catch (Exception e) {
-            return createErrorResponse("erro_processamento", "Erro ao processar a requisição: " + e.getMessage());
+            return createErrorResponse("erro_processamento", "Erro ao processar: " + e.getMessage());
         }
     }
 
-    // --- MÉTODOS DE USUÁRIO (sem alteração) ---
     private String handleCriarUsuario(JsonNode rootNode) throws Exception {
-        Usuario novoUsuario = new Usuario(rootNode.get("cpf").asText(), rootNode.get("nome").asText(), rootNode.get("senha").asText(), 100.00);
+        Usuario novoUsuario = new Usuario(
+            rootNode.get("cpf").asText(),
+            rootNode.get("nome").asText(),
+            rootNode.get("senha").asText(),
+            100.00
+        );
         usuarioDao.criar(novoUsuario);
         return createSuccessResponse("usuario_criar", "Usuário criado com sucesso.");
     }
-
+    
     private String handleLogin(JsonNode rootNode) throws Exception {
         String cpf = rootNode.get("cpf").asText();
         String senha = rootNode.get("senha").asText();
@@ -151,12 +156,14 @@ public class ClientHandler implements Runnable {
         if (cpf == null) return createErrorResponse("usuario_atualizar", "Token inválido.");
         
         Usuario usuario = usuarioDao.ler(cpf);
+        if (usuario == null) return createErrorResponse("usuario_atualizar", "Usuário não encontrado.");
+        
         JsonNode usuarioNode = rootNode.get("usuario");
         if (usuarioNode.has("nome")) usuario.setNome(usuarioNode.get("nome").asText());
         if (usuarioNode.has("senha")) usuario.setSenha(usuarioNode.get("senha").asText());
         
         usuarioDao.atualizar(usuario);
-        return createSuccessResponse("usuario_atualizar", "Usuário atualizado.");
+        return createSuccessResponse("usuario_atualizar", "Usuário atualizado com sucesso.");
     }
 
     private String handleDeletarUsuario(JsonNode rootNode) throws Exception {
@@ -166,11 +173,9 @@ public class ClientHandler implements Runnable {
         
         usuarioDao.deletar(cpf);
         sessions.remove(token);
-        return createSuccessResponse("usuario_deletar", "Usuário deletado.");
+        return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
     }
 
-
-    // --- NOVOS MÉTODOS DE TRANSAÇÃO ---
     private String handleCriarTransacao(JsonNode rootNode) {
         Connection conn = null;
         try {
@@ -191,7 +196,7 @@ public class ClientHandler implements Runnable {
 
             if (enviador == null || recebedor == null || enviador.getSaldo() < valor) {
                 conn.rollback();
-                String motivo = enviador == null ? "Remetente não encontrado." : (recebedor == null ? "Destinatário não encontrado." : "Saldo insuficiente.");
+                String motivo = "Saldo insuficiente ou um dos usuários não foi encontrado.";
                 return createErrorResponse("transacao_criar", motivo);
             }
 
@@ -205,7 +210,6 @@ public class ClientHandler implements Runnable {
             conn.commit();
 
             return createSuccessResponse("transacao_criar", "Transação realizada com sucesso.");
-
         } catch (Exception e) {
             if (conn != null) { try { conn.rollback(); } catch (SQLException ignored) {} }
             return createErrorResponse("transacao_criar", "Falha na transação: " + e.getMessage());
@@ -234,7 +238,6 @@ public class ClientHandler implements Runnable {
         return objectMapper.writeValueAsString(responseMap);
     }
     
-    // --- Métodos Auxiliares ---
     private String createSuccessResponse(String operacao, String info) throws Exception {
         return objectMapper.writeValueAsString(Map.of("operacao", operacao, "status", true, "info", info));
     }

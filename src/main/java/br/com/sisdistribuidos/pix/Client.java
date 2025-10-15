@@ -12,9 +12,7 @@ import java.net.Socket;
 import java.util.Scanner;
 
 public class Client {
-    // Removidas as constantes de IP e Porta
     private static final ObjectMapper objectMapper = new ObjectMapper();
-
     private static Socket socket;
     private static PrintWriter out;
     private static BufferedReader in;
@@ -22,13 +20,11 @@ public class Client {
     private static String loggedInUserName = null;
 
     public static void main(String[] args) {
-        // --- INÍCIO DA MUDANÇA ---
         Scanner scanner = new Scanner(System.in);
         System.out.print("Digite o endereço IP do servidor: ");
         String serverIp = scanner.nextLine();
         System.out.print("Digite a porta do servidor: ");
         int serverPort = Integer.parseInt(scanner.nextLine());
-        // --- FIM DA MUDANÇA ---
 
         try {
             socket = new Socket(serverIp, serverPort);
@@ -36,7 +32,9 @@ public class Client {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             System.out.println("Conectado ao servidor em " + serverIp + ":" + serverPort);
 
-            runMenu(scanner); // Passa o scanner para o menu
+            if (establishProtocol()) {
+                runMenu(scanner);
+            }//se tiver problemas de conectar tem que comentar o if e colocar somente o runMenu(scanner);
 
         } catch (IOException e) {
             System.err.println("Não foi possível conectar ao servidor: " + e.getMessage());
@@ -44,8 +42,27 @@ public class Client {
             closeConnection();
         }
     }
+    
+    private static boolean establishProtocol() throws IOException {
+        ObjectNode connectJson = objectMapper.createObjectNode();
+        connectJson.put("operacao", "conectar");
+        connectJson.put("versao_protocolo", "1.0");
 
-    private static void runMenu(Scanner scanner) { // Recebe o scanner
+        String responseStr = sendRawRequest(connectJson.toString());
+            
+        if (responseStr == null) return false;
+
+        JsonNode responseNode = objectMapper.readTree(responseStr);
+        boolean status = responseNode.get("status").asBoolean();
+        if (status) {
+            System.out.println("Protocolo iniciado com sucesso.");
+        } else {
+            System.err.println("Falha ao iniciar protocolo: " + responseNode.get("info").asText());
+        }
+        return status;
+    }
+
+    private static void runMenu(Scanner scanner) {
         while (socket != null && !socket.isClosed()) {
             displayMenu();
             try {
@@ -70,8 +87,8 @@ public class Client {
             System.out.println("2. Ler meus dados");
             System.out.println("3. Atualizar meus dados");
             System.out.println("4. Deletar minha conta");
-            System.out.println("5. Fazer transação (PIX)"); // <-- Adicionado
-            System.out.println("6. Ler minhas transações"); // <-- Adicionado
+            System.out.println("5. Fazer transação (PIX)");
+            System.out.println("6. Ler minhas transações");
             System.out.println("7. Sair");
         } else {
             System.out.println("1. Criar usuário");
@@ -99,14 +116,31 @@ public class Client {
             case 2: lerUsuario(); break;
             case 3: atualizarUsuario(scanner); break;
             case 4: deletarUsuario(); break;
-            case 5: fazerTransacao(scanner); break; // <-- Adicionado
-            case 6: lerTransacoes(scanner); break; // <-- Adicionado
+            case 5: fazerTransacao(scanner); break;
+            case 6: lerTransacoes(scanner); break;
             case 7:
                 System.out.println("Encerrando o cliente.");
                 closeConnection();
                 break;
             default: System.out.println("Opção inválida.");
         }
+    }
+    
+    private static String sendRawRequest(String request) throws IOException {
+        System.out.println("Cliente enviou: " + request);
+        out.println(request);
+        String response = in.readLine();
+        System.out.println("Servidor respondeu: " + response);
+        return response;
+    }
+
+    private static String sendRequest(ObjectNode json) throws IOException {
+        String request = json.toString();
+        System.out.println("Cliente enviou: " + request);
+        out.println(request);
+        String response = in.readLine();
+        System.out.println("Servidor respondeu: " + response); // Impressão centralizada aqui
+        return response;
     }
     
     private static void fazerTransacao(Scanner scanner) throws IOException {
@@ -149,7 +183,6 @@ public class Client {
         json.put("cpf", cpf);
         json.put("senha", senha);
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
         JsonNode responseNode = objectMapper.readTree(response);
         if (responseNode.get("status").asBoolean()) {
             sessionToken = responseNode.get("token").asText();
@@ -167,7 +200,6 @@ public class Client {
         json.put("operacao", "usuario_ler");
         json.put("token", sessionToken);
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
         JsonNode responseNode = objectMapper.readTree(response);
         if (responseNode.get("status").asBoolean()) {
             loggedInUserName = responseNode.path("usuario").path("nome").asText("Desconhecido");
@@ -182,9 +214,7 @@ public class Client {
         json.put("token", sessionToken);
 
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
         
-        // Limpa os dados da sessão localmente
         sessionToken = null;
         loggedInUserName = null;
     }
@@ -206,8 +236,6 @@ public class Client {
         }
     }
 
-    // --- Outros métodos (criarUsuario, atualizarUsuario, etc. permanecem aqui) ---
-
     private static void criarUsuario(Scanner scanner) throws IOException {
         System.out.print("CPF: "); String cpf = scanner.nextLine();
         System.out.print("Nome: "); String nome = scanner.nextLine();
@@ -220,7 +248,6 @@ public class Client {
         json.put("senha", senha);
         
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
     }
 
     private static void atualizarUsuario(Scanner scanner) throws IOException {
@@ -246,17 +273,9 @@ public class Client {
         String response = sendRequest(json);
         System.out.println("Servidor respondeu: " + response);
 
-        // Atualiza o nome exibido no menu, se ele foi alterado
         if (!nome.isEmpty()) {
             loggedInUserName = nome;
         }
-    }
-    
-    private static String sendRequest(ObjectNode json) throws IOException {
-        String request = json.toString();
-        // System.out.println("Cliente enviou: " + request); // Descomente para debug
-        out.println(request);
-        return in.readLine();
     }
     
     private static void closeConnection() {
