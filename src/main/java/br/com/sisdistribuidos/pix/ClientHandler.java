@@ -74,7 +74,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private String processRequest(String jsonRequest) {
+    String processRequest(String jsonRequest) {
         try {
             JsonNode rootNode = objectMapper.readTree(jsonRequest);
             String operacao = rootNode.get("operacao").asText();
@@ -95,7 +95,8 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private String handleCriarUsuario(JsonNode rootNode) throws Exception {
+    private String handleCriarUsuario(JsonNode rootNode) {
+    try {
         Usuario novoUsuario = new Usuario(
             rootNode.get("cpf").asText(),
             rootNode.get("nome").asText(),
@@ -104,7 +105,23 @@ public class ClientHandler implements Runnable {
         );
         usuarioDao.criar(novoUsuario);
         return createSuccessResponse("usuario_criar", "Usuário criado com sucesso.");
+    } catch (SQLException e) {
+        // Verifica se o erro é de violação de chave única (CPF duplicado)
+        // O código de erro 19 é comum para SQLITE_CONSTRAINT, e a mensagem geralmente contém "UNIQUE"
+        if (e.getErrorCode() == 19 && e.getMessage().contains("UNIQUE constraint failed: usuario.cpf")) {
+             System.err.println("ERRO em [usuario_criar]: Tentativa de criar CPF duplicado.");
+            return createErrorResponse("usuario_criar", "Este CPF já está cadastrado.");
+        } else {
+            // Outro erro de SQL
+            System.err.println("ERRO em [usuario_criar] (SQLException): " + e.getMessage());
+            return createErrorResponse("usuario_criar", "Erro no banco de dados ao tentar criar usuário.");
+        }
+    } catch (Exception e) {
+        // Outros erros inesperados (ex: falha ao ler JSON)
+        System.err.println("ERRO em [usuario_criar] (Exception): " + e.getMessage());
+        return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado ao criar o usuário.");
     }
+}
     
     private String handleLogin(JsonNode rootNode) throws Exception {
         String cpf = rootNode.get("cpf").asText();
