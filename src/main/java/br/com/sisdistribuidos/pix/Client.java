@@ -46,7 +46,6 @@ public class Client {
     private static boolean establishProtocol() throws IOException {
         ObjectNode connectJson = objectMapper.createObjectNode();
         connectJson.put("operacao", "conectar");
-        connectJson.put("versao_protocolo", "1.0");
 
         String responseStr = sendRawRequest(connectJson.toString());
             
