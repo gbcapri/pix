@@ -1,5 +1,6 @@
 package br.com.sisdistribuidos.pix;
 
+import br.com.sisdistribuidos.pix.validador.Validator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -46,20 +47,37 @@ public class Client {
     private static boolean establishProtocol() throws IOException {
         ObjectNode connectJson = objectMapper.createObjectNode();
         connectJson.put("operacao", "conectar");
-        connectJson.put("versao_protocolo", "1.0");
 
         String responseStr = sendRawRequest(connectJson.toString());
             
         if (responseStr == null) return false;
 
-        JsonNode responseNode = objectMapper.readTree(responseStr);
-        boolean status = responseNode.get("status").asBoolean();
-        if (status) {
-            System.out.println("Protocolo iniciado com sucesso.");
-        } else {
-            System.err.println("Falha ao iniciar protocolo: " + responseNode.get("info").asText());
+        try {
+            Validator.validateServer(responseStr); 
+            
+            JsonNode responseNode = objectMapper.readTree(responseStr);
+            boolean status = responseNode.get("status").asBoolean();
+            if (status) {
+                System.out.println("Protocolo iniciado com sucesso.");
+            } else {
+                System.err.println("Falha ao iniciar protocolo: " + responseNode.get("info").asText());
+            }
+            return status;
+        } catch (Exception e) {
+            System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'conectar': " + e.getMessage());
+            return false;
         }
-        return status;
+    }
+    
+    private static void reportarErroServidor(String operacaoEnviada, String infoErro) throws IOException {
+        System.err.println("Reportando erro ao servidor...");
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("operacao", "erro_servidor");
+        json.put("operacao_enviada", operacaoEnviada);
+        json.put("info", infoErro);
+        
+        // Apenas envia, o sendRequest já imprime a resposta do servidor ao log.
+        sendRequest(json); 
     }
 
     private static void runMenu(Scanner scanner) {
@@ -88,8 +106,9 @@ public class Client {
             System.out.println("3. Atualizar meus dados");
             System.out.println("4. Deletar minha conta");
             System.out.println("5. Fazer transação (PIX)");
-            System.out.println("6. Ler minhas transações");
-            System.out.println("7. Sair");
+            System.out.println("6. Ler minhas transações (Extrato)");
+            System.out.println("7. Fazer Depósito");
+            System.out.println("8. Sair");
         } else {
             System.out.println("1. Criar usuário");
             System.out.println("2. Fazer login");
@@ -117,8 +136,9 @@ public class Client {
             case 3: atualizarUsuario(scanner); break;
             case 4: deletarUsuario(); break;
             case 5: fazerTransacao(scanner); break;
-            case 6: lerTransacoes(scanner); break;
-            case 7:
+            case 6: lerTransacoes(scanner);break;
+            case 7: fazerDeposito(scanner); break;
+            case 8:
                 System.out.println("Encerrando o cliente.");
                 closeConnection();
                 break;
@@ -143,6 +163,46 @@ public class Client {
         return response;
     }
     
+    private static void fazerDeposito(Scanner scanner) throws IOException {
+        System.out.print("Digite o valor a ser depositado: ");
+        double valor;
+        try {
+            valor = Double.parseDouble(scanner.nextLine());
+        } catch (NumberFormatException e) {
+            System.err.println("Valor inválido. Insira um número (ex: 150.75).");
+            return;
+        }
+
+        if (valor <= 0) {
+             System.err.println("O valor do depósito deve ser positivo.");
+             return;
+        }
+
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("operacao", "depositar"); //
+        json.put("token", sessionToken);
+        json.put("valor_enviado", valor); //
+
+        String response = sendRequest(json);
+        //System.out.println("Servidor respondeu: " + response);
+        
+        try {
+            
+            Validator.validateServer(response);
+            
+             JsonNode responseNode = objectMapper.readTree(response);
+             String info = responseNode.get("info").asText();
+             if (responseNode.get("status").asBoolean()) {
+                 System.out.println("Sucesso: " + info);
+             } else {
+                 System.err.println("Erro: " + info);
+             }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'depositar': " + e.getMessage());
+             reportarErroServidor("depositar", e.getMessage());
+        }
+    }
+    
     private static void fazerTransacao(Scanner scanner) throws IOException {
         System.out.print("Digite o CPF de destino: ");
         String cpfDestino = scanner.nextLine();
@@ -156,7 +216,23 @@ public class Client {
         json.put("valor", valor);
 
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
+        if (response == null) return;
+        
+        try {
+            
+            Validator.validateServer(response);
+            
+             JsonNode responseNode = objectMapper.readTree(response);
+             String info = responseNode.get("info").asText();
+             if (responseNode.get("status").asBoolean()) {
+                 System.out.println("Sucesso: " + info);
+             } else {
+                 System.err.println("Erro na transação: " + info);
+             }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'transacao_criar': " + e.getMessage());
+             reportarErroServidor("transacao_criar", e.getMessage());
+        }
     }
     
     private static void lerTransacoes(Scanner scanner) throws IOException {
@@ -172,7 +248,70 @@ public class Client {
         json.put("data_final", dataFinal);
 
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
+        
+        
+        try {
+            
+            Validator.validateServer(response);
+            
+            JsonNode responseNode = objectMapper.readTree(response);
+
+            if (responseNode.get("status").asBoolean()) {
+                System.out.println("\n--- EXTRATO DA CONTA ---");
+                System.out.println("Período: " + dataInicial + " até " + dataFinal);
+                System.out.println("-----------------------------------------------------");
+
+                JsonNode transacoesArray = responseNode.get("transacoes");
+                if (transacoesArray == null || transacoesArray.isEmpty()) {
+                    System.out.println("Nenhuma transação encontrada neste período.");
+                } else {
+                    for (JsonNode t : transacoesArray) {
+                        // O nome do campo JSON é 'valor_enviado'
+                        String data = t.path("criado_em").asText();
+                        double valor = t.path("valor_enviado").asDouble(); 
+                        String enviadorNome = t.path("usuario_enviador").path("nome").asText("N/A");
+                        String recebedorNome = t.path("usuario_recebedor").path("nome").asText("N/A");
+                        
+                        String tipo;
+                        String valorDisplay;
+                        
+                        // Checa se é depósito (enviador == recebedor)
+                        if (enviadorNome.equals(recebedorNome)) {
+                            tipo = "DEPÓSITO";
+                            valorDisplay = String.format("+ R$ %.2f", valor);
+                        } 
+                        // Checa se é envio (o usuário logado é o enviador)
+                        else if (enviadorNome.equals(loggedInUserName)) {
+                            tipo = "ENVIO (PIX)";
+                            valorDisplay = String.format("- R$ %.2f", valor);
+                        } 
+                        // Senão, é recebimento (o usuário logado é o recebedor)
+                        else {
+                            tipo = "RECEBIMENTO (PIX)";
+                            valorDisplay = String.format("+ R$ %.2f", valor);
+                        }
+                        
+                        System.out.println("\nData: " + data);
+                        System.out.println("Tipo: " + tipo);
+                        System.out.println("Valor: " + valorDisplay);
+                        
+                        if (tipo.equals("ENVIO (PIX)")) {
+                            System.out.println("Para: " + recebedorNome);
+                        } else if (tipo.equals("RECEBIMENTO (PIX)")) {
+                            System.out.println("De: " + enviadorNome);
+                        }
+                    }
+                }
+                System.out.println("-----------------------------------------------------");
+
+            } else {
+                // Se status == false, apenas loga o erro (o raw JSON já foi impresso)
+                System.err.println("Erro ao buscar extrato: " + responseNode.get("info").asText());
+            }
+        } catch (Exception e) {
+            System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'transacao_ler': " + e.getMessage());
+             reportarErroServidor("transacao_ler", e.getMessage());
+        }
     }
     
     private static void fazerLogin(Scanner scanner) throws IOException {
@@ -182,15 +321,28 @@ public class Client {
         json.put("operacao", "usuario_login");
         json.put("cpf", cpf);
         json.put("senha", senha);
+        
         String response = sendRequest(json);
-        JsonNode responseNode = objectMapper.readTree(response);
-        if (responseNode.get("status").asBoolean()) {
-            sessionToken = responseNode.get("token").asText();
-            System.out.println("Login bem-sucedido. Buscando dados do usuário...");
-            lerUsuario();
-        } else {
-            sessionToken = null;
-            loggedInUserName = null;
+        if (response == null) return;
+        
+        try {
+            // Valida a resposta (REGRA 2.0)
+            Validator.validateServer(response);
+
+            JsonNode responseNode = objectMapper.readTree(response);
+            if (responseNode.get("status").asBoolean()) {
+                sessionToken = responseNode.get("token").asText();
+                System.out.println("Login bem-sucedido. Buscando dados do usuário...");
+                lerUsuario();
+            } else {
+                sessionToken = null;
+                loggedInUserName = null;
+                String info = responseNode.path("info").asText("Erro desconhecido.");
+                System.err.println("Erro no login: " + info);
+            }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_login': " + e.getMessage());
+             reportarErroServidor("usuario_login", e.getMessage());
         }
     }
     
@@ -199,10 +351,22 @@ public class Client {
         ObjectNode json = objectMapper.createObjectNode();
         json.put("operacao", "usuario_ler");
         json.put("token", sessionToken);
+        
         String response = sendRequest(json);
-        JsonNode responseNode = objectMapper.readTree(response);
-        if (responseNode.get("status").asBoolean()) {
-            loggedInUserName = responseNode.path("usuario").path("nome").asText("Desconhecido");
+        if (response == null) return;
+        
+        try {
+            Validator.validateServer(response);
+
+            JsonNode responseNode = objectMapper.readTree(response);
+            if (responseNode.get("status").asBoolean()) {
+                loggedInUserName = responseNode.path("usuario").path("nome").asText("Desconhecido");
+            } else {
+                 System.err.println("Erro ao ler dados: " + responseNode.path("info").asText());
+            }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_ler': " + e.getMessage());
+             reportarErroServidor("usuario_ler", e.getMessage());
         }
     }
     
@@ -214,6 +378,16 @@ public class Client {
         json.put("token", sessionToken);
 
         String response = sendRequest(json);
+        if (response == null) return;
+        
+        try {
+             Validator.validateServer(response);
+             JsonNode responseNode = objectMapper.readTree(response);
+             System.out.println(responseNode.get("info").asText()); 
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_logout': " + e.getMessage());
+             reportarErroServidor("usuario_logout", e.getMessage());
+        }
         
         sessionToken = null;
         loggedInUserName = null;
@@ -227,12 +401,23 @@ public class Client {
         json.put("token", sessionToken);
         
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
+        if (response == null) return;
         
-        JsonNode responseNode = objectMapper.readTree(response);
-        if (responseNode.get("status").asBoolean()) {
-            sessionToken = null;
-            loggedInUserName = null;
+        try {
+            Validator.validateServer(response);
+            JsonNode responseNode = objectMapper.readTree(response);
+            
+            String info = responseNode.get("info").asText();
+            if (responseNode.get("status").asBoolean()) {
+                System.out.println("Sucesso: " + info);
+                sessionToken = null;
+                loggedInUserName = null;
+            } else {
+                System.err.println("Erro ao deletar: " + info);
+            }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_deletar': " + e.getMessage());
+             reportarErroServidor("usuario_deletar", e.getMessage());
         }
     }
 
@@ -247,7 +432,22 @@ public class Client {
         json.put("nome", nome);
         json.put("senha", senha);
         
-        String response = sendRequest(json);
+        String response = sendRequest(json); 
+        if (response == null) return;
+
+        try {
+             Validator.validateServer(response);
+             JsonNode responseNode = objectMapper.readTree(response);
+             String info = responseNode.get("info").asText();
+             if (responseNode.get("status").asBoolean()) {
+                 System.out.println("Sucesso: " + info);
+             } else {
+                 System.err.println("Erro no cadastro: " + info); 
+             }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_criar': " + e.getMessage());
+             reportarErroServidor("usuario_criar", e.getMessage());
+        }
     }
 
     private static void atualizarUsuario(Scanner scanner) throws IOException {
@@ -271,10 +471,23 @@ public class Client {
         json.set("usuario", usuarioNode);
 
         String response = sendRequest(json);
-        System.out.println("Servidor respondeu: " + response);
-
-        if (!nome.isEmpty()) {
-            loggedInUserName = nome;
+        if (response == null) return;
+        
+        try {
+            Validator.validateServer(response);
+             JsonNode responseNode = objectMapper.readTree(response);
+             String info = responseNode.get("info").asText();
+             if (responseNode.get("status").asBoolean()) {
+                 System.out.println("Sucesso: " + info);
+                 if (!nome.isEmpty()) {
+                     loggedInUserName = nome; // Atualiza o nome para o extrato
+                 }
+             } else {
+                 System.err.println("Erro ao atualizar: " + info);
+             }
+        } catch (Exception e) {
+             System.err.println("ERRO DE PROTOCOLO: O servidor enviou uma resposta inválida para 'usuario_atualizar': " + e.getMessage());
+             reportarErroServidor("usuario_atualizar", e.getMessage());
         }
     }
     

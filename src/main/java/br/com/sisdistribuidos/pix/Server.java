@@ -3,6 +3,12 @@ package br.com.sisdistribuidos.pix;
 import br.com.sisdistribuidos.pix.database.DatabaseManager;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.DatagramSocket;
+import java.net.NetworkInterface;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -55,11 +61,25 @@ public class Server {
     }
     
     private static String findServerIpAddress() {
+        try (final DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(InetAddress.getByName("8.8.8.8"), 10002);
+            String ip = socket.getLocalAddress().getHostAddress();
+            
+            InetAddress addr = InetAddress.getByName(ip);
+            if (addr.isSiteLocalAddress()) {
+                 return ip;
+            }
+        } catch (SocketException | UnknownHostException e) {
+            System.err.println("Método preferencial (UDP) falhou, tentando fallback: " + e.getMessage());
+        }
+
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             for (NetworkInterface ni : Collections.list(interfaces)) {
-                if (!ni.isUp() || ni.isLoopback()) continue;
-
+                if (ni.isLoopback() || !ni.isUp() || ni.isVirtual()) {
+                    continue;
+                }
+                
                 Enumeration<InetAddress> addresses = ni.getInetAddresses();
                 for (InetAddress addr : Collections.list(addresses)) {
                     if (addr.isSiteLocalAddress() && !addr.isLinkLocalAddress()) {
@@ -67,8 +87,10 @@ public class Server {
                     }
                 }
             }
-             return InetAddress.getLocalHost().getHostAddress();
-        } catch (SocketException | java.net.UnknownHostException e) {
+            
+            return InetAddress.getLocalHost().getHostAddress();
+            
+        } catch (SocketException | UnknownHostException e) {
             System.err.println("Erro ao obter endereço IP local: " + e.getMessage());
             return null;
         }
