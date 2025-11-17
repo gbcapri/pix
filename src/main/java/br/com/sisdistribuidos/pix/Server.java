@@ -15,21 +15,30 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.util.Collections;
 import java.util.Enumeration;
-import java.util.Scanner;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Server {
+    
+    private static final int DEFAULT_PORT = 12345;
+    
     public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
-        System.out.print("Digite a porta para iniciar o servidor: ");
-        int port = Integer.parseInt(scanner.nextLine());
-
+        
+        ServerGUI serverGUI = new ServerGUI();
+        serverGUI.start();
+        
+        Map<String, String> sessions = new ConcurrentHashMap<>();
+        
+        int port = DEFAULT_PORT;
+        
         try {
             DatabaseManager.initialize();
-            System.out.println("Banco de dados inicializado com sucesso.");
+            serverGUI.log("Banco de dados inicializado com sucesso.");
         } catch (Exception e) {
-            System.err.println("Erro FATAL na inicialização do banco de dados: " + e.getMessage());
+            serverGUI.log("Erro FATAL na inicialização do banco de dados: " + e.getMessage());
             return;
         }
 
@@ -39,23 +48,23 @@ public class Server {
 
             String ipAddress = findServerIpAddress();
             if (ipAddress != null) {
-                System.out.println("Endereço IPv4 do Servidor: " + ipAddress);
+                serverGUI.log("Endereço IPv4 do Servidor: " + ipAddress);
             } else {
-                 System.out.println("Não foi possível determinar o endereço IPv4 local.");
+                 serverGUI.log("Não foi possível determinar o endereço IPv4 local.");
             }
 
-            System.out.println("Servidor iniciado na porta " + port);
-            System.out.println("Aguardando conexões de clientes...");
+            serverGUI.log("Servidor iniciado na porta " + port);
+            serverGUI.log("Aguardando conexões de clientes...");
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                System.out.println("Cliente conectado: " + clientSocket.getInetAddress().getHostAddress());
-                pool.submit(new ClientHandler(clientSocket));
+                serverGUI.log("Cliente conectado: " + clientSocket.getInetAddress().getHostAddress());
+                
+                pool.submit(new ClientHandler(clientSocket, serverGUI, sessions));
             }
         } catch (IOException e) {
-            System.err.println("Erro ao iniciar o servidor na porta " + port + ": " + e.getMessage());
+            serverGUI.log("Erro ao iniciar o servidor na porta " + port + ": " + e.getMessage());
         } finally {
-             scanner.close();
              pool.shutdown();
         }
     }

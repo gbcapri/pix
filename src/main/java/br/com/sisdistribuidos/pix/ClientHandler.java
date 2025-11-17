@@ -13,6 +13,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.math.BigDecimal;
 import java.net.Socket;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -29,10 +30,14 @@ public class ClientHandler implements Runnable {
     private final UsuarioDAO usuarioDao;
     private final TransacaoDAO transacaoDao;
 
-    private static final Map<String, String> sessions = new HashMap<>();
+    private final ServerGUI serverGUI;
+    private final Map<String, String> sessions;
+    private String userToken = null;
 
-    public ClientHandler(Socket socket) {
+    public ClientHandler(Socket socket, ServerGUI serverGUI, Map<String, String> sessions) {
         this.clientSocket = socket;
+        this.serverGUI = serverGUI;
+        this.sessions = sessions;
         this.objectMapper = new ObjectMapper();
         this.usuarioDao = new UsuarioDAO();
         this.transacaoDao = new TransacaoDAO();
@@ -46,7 +51,7 @@ public class ClientHandler implements Runnable {
         ) {
             String firstLine = in.readLine();
             if (firstLine == null) return;
-            System.out.println("Servidor recebeu: " + firstLine);
+            serverGUI.log("Servidor recebeu: " + firstLine);
 
             String operacaoConexao = "conectar";
             try {
@@ -60,38 +65,36 @@ public class ClientHandler implements Runnable {
                 }
                 
             } catch (Exception e) {
-                // Se a validação falhar (sintaxe ou protocolo), envia o erro e fecha.
-                // (Regra 5.3 modificada para enviar erro antes de fechar)
                 String errorResponse = createErrorResponse(operacaoConexao, e.getMessage());
-                System.out.println("Servidor enviou: " + errorResponse);
+                serverGUI.log("Servidor enviou: " + errorResponse);
                 out.println(errorResponse);
-                return; // Fecha a conexão
+                return; 
             }
 
             String successResponse = createSuccessResponse("conectar", "Conexão estabelecida com sucesso.");
-            System.out.println("Servidor enviou: " + successResponse);
+            serverGUI.log("Servidor enviou: " + successResponse);
             out.println(successResponse);
 
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
-                System.out.println("Servidor recebeu: " + inputLine);
+                serverGUI.log("Servidor recebeu: " + inputLine);
                 String response = processRequest(inputLine);
                 
-                // Implementa a Regra 5.2: Se a resposta for null, encerra a conexão
+                //Se a resposta for null, encerra a conexão
                 if (response == null) {
-                    System.out.println("Servidor: Erro de sintaxe JSON detectado. Encerrando conexão.");
-                    break; // Sai do loop e fecha o socket
+                    serverGUI.log("Servidor: Erro de sintaxe JSON detectado. Encerrando conexão.");
+                    break;
                 }
                 
-                System.out.println("Servidor enviou: " + response);
+                serverGUI.log("Servidor enviou: " + response);
                 out.println(response);
             }
         } catch (Exception e) {
-            System.err.println("Erro na comunicação com o cliente: " + e.getMessage());
+            serverGUI.log("Erro na comunicação com o cliente: " + e.getMessage());
         } finally {
             try {
                 clientSocket.close();
-                System.out.println("Cliente desconectado: " + clientSocket.getInetAddress().getHostAddress());
+                serverGUI.log("Cliente desconectado: " + clientSocket.getInetAddress().getHostAddress());
             } catch (IOException e) { /* Ignorar */ }
         }
     }
@@ -100,7 +103,7 @@ public class ClientHandler implements Runnable {
         JsonNode rootNode;
         String operacao = "desconhecida";
         try {
-            // 1. Tenta parsear o JSON. Se falhar, é erro de sintaxe.
+            // Tenta parsear o JSON. Se falhar, é erro de sintaxe.
             rootNode = objectMapper.readTree(jsonRequest);
             if (rootNode.has("operacao")) {
                 operacao = rootNode.get("operacao").asText();
@@ -108,16 +111,14 @@ public class ClientHandler implements Runnable {
                  throw new Exception("O campo 'operacao' é obrigatório."); // Força erro de sintaxe
             }
         } catch (Exception e) {
-            // REGRA 5.2: Erro de Sintaxe JSON. Retorna null para fechar a conexão.
             return null; 
         }
 
         try {
-            // 2. Valida o protocolo (campos, formatos, etc.)
             Validator.validateClient(jsonRequest); 
         } catch (Exception e) {
             // REGRA 5.1: Erro de Validação (Regra de negócio/protocolo). Retorna erro JSON.
-            System.err.println("ERRO de Validação: " + e.getMessage());
+            serverGUI.log("ERRO de Validação: " + e.getMessage());
             return createErrorResponse(operacao, e.getMessage());
         }
         try {
@@ -136,9 +137,15 @@ public class ClientHandler implements Runnable {
                 default: return createErrorResponse("desconhecida", "Operação não reconhecida.");
             }
         } catch (Exception e) {
-            System.err.println("ERRO Interno no Servidor (Operação: " + operacao + "): " + e.getMessage());
+            serverGUI.log("ERRO Interno no Servidor (Operação: " + operacao + "): " + e.getMessage());
             return createErrorResponse(operacao, "Erro interno no servidor: " + e.getMessage());
         }
+    }
+    
+    private boolean hasMoreThanTwoDecimalPlaces(double valor) {
+        // Converte para String para evitar imprecisão de double
+        // Usa BigDecimal para verificar a escala (número de casas decimais)
+        return BigDecimal.valueOf(valor).scale() > 2;
     }
 
     private String handleCriarUsuario(JsonNode rootNode) {
@@ -153,14 +160,14 @@ public class ClientHandler implements Runnable {
         return createSuccessResponse("usuario_criar", "Usuário criado com sucesso.");
     } catch (SQLException e) {
         if (e.getErrorCode() == 19 && e.getMessage().contains("UNIQUE constraint failed: usuario.cpf")) {
-             System.err.println("ERRO em [usuario_criar]: Tentativa de criar CPF duplicado.");
+             serverGUI.log("ERRO em [usuario_criar]: Tentativa de criar CPF duplicado.");
             return createErrorResponse("usuario_criar", "Este CPF já está cadastrado.");
         } else {
-            System.err.println("ERRO em [usuario_criar] (SQLException): " + e.getMessage());
+            serverGUI.log("ERRO em [usuario_criar] (SQLException): " + e.getMessage());
             return createErrorResponse("usuario_criar", "Erro no banco de dados ao tentar criar usuário.");
         }
     } catch (Exception e) {
-        System.err.println("ERRO em [usuario_criar] (Exception): " + e.getMessage());
+        serverGUI.log("ERRO em [usuario_criar] (Exception): " + e.getMessage());
         return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado ao criar o usuário.");
     }
 }
@@ -171,7 +178,12 @@ public class ClientHandler implements Runnable {
         Usuario usuario = usuarioDao.ler(cpf);
         if (usuario != null && usuario.getSenha().equals(senha)) {
             String token = UUID.randomUUID().toString();
-            sessions.put(token, cpf);
+            
+            this.userToken = token; // Armazena o token neste handler
+            sessions.put(token, cpf); // Adiciona ao mapa compartilhado
+            serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+            serverGUI.log("Login OK: " + cpf);
+            
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("operacao", "usuario_login");
             responseMap.put("status", true);
@@ -186,6 +198,9 @@ public class ClientHandler implements Runnable {
     private String handleLogout(JsonNode rootNode) throws Exception {
         String token = rootNode.get("token").asText();
         if (sessions.remove(token) != null) {
+            this.userToken = null; // Limpa o token deste handler
+            serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+            serverGUI.log("Logout OK: " + token);
             return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
         } else {
             return createErrorResponse("usuario_logout", "Token inválido.");
@@ -232,6 +247,9 @@ public class ClientHandler implements Runnable {
         
         usuarioDao.deletar(cpf);
         sessions.remove(token);
+        this.userToken = null; // Limpa o token deste handler
+        serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+        serverGUI.log("Conta Deletada: " + cpf);
         return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
     }
 
@@ -246,6 +264,20 @@ public class ClientHandler implements Runnable {
             
             String cpfRecebedor = rootNode.get("cpf_destino").asText();
             double valor = rootNode.get("valor").asDouble();
+            
+            if (cpfEnviador.equals(cpfRecebedor)) {
+                return createErrorResponse("transacao_criar", "Você não pode enviar um PIX para si mesmo. Use a operação 'Depositar'.");
+            }
+            
+            if (!Double.isFinite(valor)) {
+                 return createErrorResponse("transacao_criar", "Valor inválido (Infinito ou NaN).");
+            }
+            if (hasMoreThanTwoDecimalPlaces(valor)) {
+                 return createErrorResponse("transacao_criar", "Valor inválido. A transação não pode ter mais que duas casas decimais.");
+            }
+            if (valor <= 0) { // (Validação que já existia no seu Client.java, trazendo para o servidor)
+                 return createErrorResponse("transacao_criar", "Valor da transação deve ser positivo.");
+            }
 
             conn = DatabaseManager.getConnection();
             conn.setAutoCommit(false);
@@ -300,7 +332,7 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse("transacao_ler", "O período máximo do extrato é de 31 dias.");
             }
         } catch (Exception e) {
-             System.err.println("Erro ao parsear datas (já validadas?): " + e.getMessage());
+             serverGUI.log("Erro ao parsear datas (já validadas?): " + e.getMessage());
              return createErrorResponse("transacao_ler", "Formato de data inválido para cálculo de período.");
         }
         
@@ -343,6 +375,17 @@ public class ClientHandler implements Runnable {
             }
 
             double valor = rootNode.path("valor_enviado").asDouble();
+            
+            if (!Double.isFinite(valor)) {
+                 return createErrorResponse("depositar", "Valor inválido (Infinito ou NaN).");
+            }
+            if (hasMoreThanTwoDecimalPlaces(valor)) {
+                 return createErrorResponse("depositar", "Valor inválido. O depósito não pode ter mais que duas casas decimais.");
+            }
+             if (valor <= 0) { // (Validação que já existia)
+                 return createErrorResponse("depositar", "Valor do depósito deve ser positivo.");
+            }
+            
             if (valor <= 0) {
                  return createErrorResponse("depositar", "Valor do depósito deve ser positivo.");
             }
@@ -368,7 +411,7 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             if (conn != null) { try { conn.rollback(); } catch (SQLException ignored) {} }
-            System.err.println("ERRO em [depositar] (Exception): " + e.getMessage());
+            serverGUI.log("ERRO em [depositar] (Exception): " + e.getMessage());
             return createErrorResponse("depositar", "Falha no depósito: " + e.getMessage());
         } finally {
             if (conn != null) { try { conn.close(); } catch (SQLException ignored) {} }
@@ -379,7 +422,7 @@ public class ClientHandler implements Runnable {
         String operacaoEnviada = rootNode.path("operacao_enviada").asText();
         String infoErro = rootNode.path("info").asText();
         
-        System.err.println("[ERRO REPORTADO PELO CLIENTE] Operação: " + operacaoEnviada + " | Info: " + infoErro);
+        serverGUI.log("[ERRO REPORTADO PELO CLIENTE] Operação: " + operacaoEnviada + " | Info: " + infoErro);
         
         return createSuccessResponse("erro_servidor", "Erro logado pelo servidor.");
     }
