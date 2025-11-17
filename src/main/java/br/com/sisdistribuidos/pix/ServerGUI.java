@@ -68,8 +68,9 @@ public class ServerGUI extends JFrame {
                 users.forEach(userListModel::addElement);
             }
             // Atualiza o título do painel com a contagem
-            ((TitledBorder) userList.getParent().getParent().getBorder()).setTitle("Usuários Logados (" + users.size() + ")");
-            userList.getParent().getParent().repaint();
+            JComponent scrollPane = (JComponent) userList.getParent().getParent(); 
+            ((TitledBorder) scrollPane.getBorder()).setTitle("Usuários Logados (" + users.size() + ")");
+            scrollPane.repaint();
         });
     }
 

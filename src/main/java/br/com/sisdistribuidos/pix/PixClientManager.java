@@ -24,9 +24,11 @@ public class PixClientManager {
     private final ObjectMapper objectMapper;
     private String sessionToken = null;
     private String loggedInUserName = null;
+    private ClientLogGUI clientLog;
 
-    public PixClientManager() {
+    public PixClientManager(ClientLogGUI logGUI) { // <-- ADICIONAR PARÂMETRO
         this.objectMapper = new ObjectMapper();
+        this.clientLog = logGUI; // <-- ADICIONAR ESTA LINHA
     }
 
     /**
@@ -127,6 +129,9 @@ public class PixClientManager {
     private String sendRequestInternal(String request) throws IOException {
         if (out == null || in == null) throw new IOException("Cliente não inicializado.");
         
+        if (clientLog != null) {
+            clientLog.log("Cliente enviou: " + request);
+        }
         // O servidor verá isso nos logs da GUI dele
         out.println(request); 
         
@@ -134,6 +139,10 @@ public class PixClientManager {
         
         // O servidor verá isso nos logs da GUI dele
         // (Nós não imprimimos mais nada no console do cliente)
+        
+        if (clientLog != null) {
+            clientLog.log("Servidor respondeu: " + response);
+        }
         
         return response;
     }

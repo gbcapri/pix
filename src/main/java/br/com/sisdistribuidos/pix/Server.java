@@ -20,20 +20,51 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.swing.JOptionPane;
 
 public class Server {
     
-    private static final int DEFAULT_PORT = 12345;
+    private static final int DEFAULT_PORT = 20000;
     
     public static void main(String[] args) {
+        
+        int port = DEFAULT_PORT;
+        String portStr = (String) JOptionPane.showInputDialog(
+                null, // Janela pai (nenhuma)
+                "Digite a porta do servidor:", // Mensagem
+                "Configuração do Servidor", // Título
+                JOptionPane.QUESTION_MESSAGE, // Tipo de ícone
+                null, // Icone customizado (nenhum)
+                null, // Opções de seleção (nenhuma)
+                Integer.toString(DEFAULT_PORT) // Valor inicial
+        );
+        
+        // Se o usuário clicou em "Cancel", encerra a aplicação
+        if (portStr == null) {
+            System.out.println("Inicialização do servidor cancelada pelo usuário.");
+            return;
+        }
+
+        try {
+            // Se o usuário não deixou em branco, tenta parsear
+            if (!portStr.trim().isEmpty()) {
+                port = Integer.parseInt(portStr);
+            }
+            // Se deixou em branco, 'port' continua sendo DEFAULT_PORT
+        } catch (NumberFormatException e) {
+            // Se digitou texto inválido
+            JOptionPane.showMessageDialog(null, 
+                    "Porta inválida. Usando a porta padrão: " + DEFAULT_PORT,
+                    "Aviso", 
+                    JOptionPane.WARNING_MESSAGE);
+            port = DEFAULT_PORT;
+        }
         
         ServerGUI serverGUI = new ServerGUI();
         serverGUI.start();
         
         Map<String, String> sessions = new ConcurrentHashMap<>();
-        
-        int port = DEFAULT_PORT;
-        
+                
         try {
             DatabaseManager.initialize();
             serverGUI.log("Banco de dados inicializado com sucesso.");
