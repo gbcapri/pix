@@ -16,7 +16,11 @@ public class DatabaseManager {
     public static Connection getConnection() throws SQLException {
         try {
             Class.forName("org.sqlite.JDBC");
-            return DriverManager.getConnection(DB_URL); 
+            Connection conn = DriverManager.getConnection(DB_URL);
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON;");
+            }
+            return conn;
         } catch (ClassNotFoundException e) {
             throw new SQLException("Driver do SQLite não encontrado.", e); 
         }
@@ -49,7 +53,7 @@ public class DatabaseManager {
             insertMockData(conn);
 
             String createTransacaoTable =   "CREATE TABLE IF NOT EXISTS transacao (" +
-                                            "id VARCHAR(255) PRIMARY KEY," +
+                                            "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                                             "valor REAL NOT NULL," +
                                             "cpf_enviador VARCHAR(255) NOT NULL," +
                                             "cpf_recebedor VARCHAR(255) NOT NULL," +
@@ -78,19 +82,19 @@ public class DatabaseManager {
         
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, "111.111.111-11");
-            pstmt.setString(2, "Alice");
+            pstmt.setString(2, "Alices");
             pstmt.setString(3, "111111");
             pstmt.setDouble(4, 1000.00);
             pstmt.addBatch();
 
             pstmt.setString(1, "222.222.222-22");
-            pstmt.setString(2, "Bruno");
+            pstmt.setString(2, "Brunos");
             pstmt.setString(3, "111111");
             pstmt.setDouble(4, 500.50);
             pstmt.addBatch();
             
             pstmt.setString(1, "333.333.333-33");
-            pstmt.setString(2, "Carla");
+            pstmt.setString(2, "Carlea");
             pstmt.setString(3, "111111");
             pstmt.setDouble(4, 2500.75);
             pstmt.addBatch();

@@ -11,14 +11,13 @@ import java.util.List;
 public class TransacaoDAO {
 
     public void criarComConexao(Connection conn, Transacao transacao) throws SQLException {
-        String sql = "INSERT INTO transacao (id, valor, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO transacao (valor, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, transacao.getId());
-            stmt.setDouble(2, transacao.getValor());
-            stmt.setString(3, transacao.getCpfEnviador());
-            stmt.setString(4, transacao.getCpfRecebedor());
-            stmt.setString(5, transacao.getCriadoEm());
-            stmt.setString(6, transacao.getAtualizadoEm());
+            stmt.setDouble(1, transacao.getValor());
+            stmt.setString(2, transacao.getCpfEnviador());
+            stmt.setString(3, transacao.getCpfRecebedor());
+            stmt.setString(4, transacao.getCriadoEm());
+            stmt.setString(5, transacao.getAtualizadoEm());
             stmt.executeUpdate();
         }
     }
@@ -39,7 +38,7 @@ public class TransacaoDAO {
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     Transacao transacao = new Transacao();
-                    transacao.setId(rs.getString("id"));
+                    transacao.setId(rs.getInt("id"));
                     transacao.setValor(rs.getDouble("valor"));
                     transacao.setCpfEnviador(rs.getString("cpf_enviador"));
                     transacao.setCpfRecebedor(rs.getString("cpf_recebedor"));

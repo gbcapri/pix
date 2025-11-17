@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 // A anotação @JsonInclude é usada para não incluir campos nulos na serialização JSON.
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class Transacao {
-    private String id;
+    private int id;
     @JsonProperty("valor_enviado")
     private double valor;
     @JsonProperty("usuario_enviador")
@@ -28,7 +28,6 @@ public class Transacao {
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     public Transacao() {
-        this.id = UUID.randomUUID().toString();
         String agora = LocalDateTime.now().format(ISO_FORMATTER);
         this.criadoEm = agora;
         this.atualizadoEm = agora;
@@ -41,8 +40,8 @@ public class Transacao {
         this.cpfRecebedor = cpfRecebedor;
     }
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public int getId() { return id; }
+    public void setId(int id) { this.id = id; }
 
     public double getValor() { return valor; }
     public void setValor(double valor) { this.valor = valor; }
@@ -74,7 +73,7 @@ public class Transacao {
     @Override
     public String toString() {
         return "Transacao{" +
-                "id='" + id + '\'' +
+                "id=" + id + '\'' +
                 ", valor=" + valor +
                 ", cpfEnviador='" + cpfEnviador + '\'' +
                 ", cpfRecebedor='" + cpfRecebedor + '\'' +

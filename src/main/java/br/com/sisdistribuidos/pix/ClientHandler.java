@@ -163,10 +163,12 @@ public class ClientHandler implements Runnable {
              serverGUI.log("ERRO em [usuario_criar]: Tentativa de criar CPF duplicado.");
             return createErrorResponse("usuario_criar", "Este CPF já está cadastrado.");
         } else {
+            String erroReal = e.getMessage();
             serverGUI.log("ERRO em [usuario_criar] (SQLException): " + e.getMessage());
             return createErrorResponse("usuario_criar", "Erro no banco de dados ao tentar criar usuário.");
         }
     } catch (Exception e) {
+        String erroReal = e.getMessage();
         serverGUI.log("ERRO em [usuario_criar] (Exception): " + e.getMessage());
         return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado ao criar o usuário.");
     }
