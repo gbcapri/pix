@@ -93,6 +93,14 @@ public class ClientHandler implements Runnable {
             serverGUI.log("Erro na comunicação com o cliente: " + e.getMessage());
         } finally {
             try {
+                // Remove a sessão do usuário ao desconectar
+                if (userToken != null) {
+                    String cpf = sessions.remove(userToken);
+                    if (cpf != null) {
+                        serverGUI.log("Sessão encerrada para: " + cpf);
+                        serverGUI.updateUserList(sessions.keySet());
+                    }
+                }
                 clientSocket.close();
                 serverGUI.log("Cliente desconectado: " + clientSocket.getInetAddress().getHostAddress());
             } catch (IOException e) { /* Ignorar */ }
@@ -103,7 +111,7 @@ public class ClientHandler implements Runnable {
         JsonNode rootNode;
         String operacao = "desconhecida";
         try {
-            // Tenta parsear o JSON. Se falhar, é erro de sintaxe.
+            // Tenta parsear o JSON. Se falhar, é erro de sintaxe (Regra 5.2)
             rootNode = objectMapper.readTree(jsonRequest);
             if (rootNode.has("operacao")) {
                 operacao = rootNode.get("operacao").asText();
@@ -111,7 +119,7 @@ public class ClientHandler implements Runnable {
                  throw new Exception("O campo 'operacao' é obrigatório."); // Força erro de sintaxe
             }
         } catch (Exception e) {
-            return null; 
+            return null; // Encerra a conexão
         }
 
         try {
@@ -143,7 +151,6 @@ public class ClientHandler implements Runnable {
     }
     
     private boolean hasMoreThanTwoDecimalPlaces(double valor) {
-        // Converte para String para evitar imprecisão de double
         // Usa BigDecimal para verificar a escala (número de casas decimais)
         return BigDecimal.valueOf(valor).scale() > 2;
     }
@@ -159,18 +166,23 @@ public class ClientHandler implements Runnable {
         usuarioDao.criar(novoUsuario);
         return createSuccessResponse("usuario_criar", "Usuário criado com sucesso.");
     } catch (SQLException e) {
-        if (e.getErrorCode() == 19 && e.getMessage().contains("UNIQUE constraint failed: usuario.cpf")) {
+        String erroReal = e.getMessage(); // Captura o erro real
+        if (e.getErrorCode() == 19 && erroReal.contains("UNIQUE constraint failed: usuario.cpf")) {
              serverGUI.log("ERRO em [usuario_criar]: Tentativa de criar CPF duplicado.");
             return createErrorResponse("usuario_criar", "Este CPF já está cadastrado.");
         } else {
-            String erroReal = e.getMessage();
-            serverGUI.log("ERRO em [usuario_criar] (SQLException): " + e.getMessage());
-            return createErrorResponse("usuario_criar", "Erro no banco de dados ao tentar criar usuário.");
+            // Loga o erro real
+            serverGUI.log("ERRO em [usuario_criar] (SQLException): " + erroReal);
+            // --- CORREÇÃO AQUI ---
+            // RETORNA O ERRO REAL PARA O CLIENTE
+            return createErrorResponse("usuario_criar", "Erro no banco de dados: " + erroReal);
         }
     } catch (Exception e) {
         String erroReal = e.getMessage();
-        serverGUI.log("ERRO em [usuario_criar] (Exception): " + e.getMessage());
-        return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado ao criar o usuário.");
+        serverGUI.log("ERRO em [usuario_criar] (Exception): " + erroReal);
+        // --- CORREÇÃO AQUI ---
+        // RETORNA O ERRO REAL PARA O CLIENTE
+        return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado: " + erroReal);
     }
 }
     
@@ -199,10 +211,11 @@ public class ClientHandler implements Runnable {
 
     private String handleLogout(JsonNode rootNode) throws Exception {
         String token = rootNode.get("token").asText();
-        if (sessions.remove(token) != null) {
+        String cpf = sessions.get(token); // Pega o CPF antes de remover
+        if (cpf != null && sessions.remove(token, cpf)) {
             this.userToken = null; // Limpa o token deste handler
             serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
-            serverGUI.log("Logout OK: " + token);
+            serverGUI.log("Logout OK: " + cpf);
             return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
         } else {
             return createErrorResponse("usuario_logout", "Token inválido.");
@@ -217,7 +230,7 @@ public class ClientHandler implements Runnable {
         Usuario usuario = usuarioDao.ler(cpf);
         if (usuario == null) return createErrorResponse("usuario_ler", "Usuário não encontrado.");
         
-        usuario.setSenha(null);
+        usuario.setSenha(null); // Remove a senha da resposta
         Map<String, Object> responseMap = new HashMap<>();
         responseMap.put("operacao", "usuario_ler");
         responseMap.put("status", true);
@@ -247,7 +260,7 @@ public class ClientHandler implements Runnable {
         String cpf = sessions.get(token);
         if (cpf == null) return createErrorResponse("usuario_deletar", "Token inválido.");
         
-        usuarioDao.deletar(cpf);
+        usuarioDao.deletar(cpf); // O "ON DELETE CASCADE" ou "SET NULL" (depende da sua versão) cuida das transações
         sessions.remove(token);
         this.userToken = null; // Limpa o token deste handler
         serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
@@ -277,7 +290,7 @@ public class ClientHandler implements Runnable {
             if (hasMoreThanTwoDecimalPlaces(valor)) {
                  return createErrorResponse("transacao_criar", "Valor inválido. A transação não pode ter mais que duas casas decimais.");
             }
-            if (valor <= 0) { // (Validação que já existia no seu Client.java, trazendo para o servidor)
+            if (valor <= 0) { 
                  return createErrorResponse("transacao_criar", "Valor da transação deve ser positivo.");
             }
 
@@ -298,7 +311,8 @@ public class ClientHandler implements Runnable {
             usuarioDao.atualizarComConexao(conn, enviador);
             usuarioDao.atualizarComConexao(conn, recebedor);
             
-            Transacao novaTransacao = new Transacao(valor, cpfEnviador, cpfRecebedor);
+            // CONSTRUTOR CORRIGIDO: Passa os CPFs (String) como esperado
+            Transacao novaTransacao = new Transacao(valor, cpfEnviador, cpfRecebedor); 
             transacaoDao.criarComConexao(conn, novaTransacao);
             conn.commit();
 
@@ -340,7 +354,9 @@ public class ClientHandler implements Runnable {
         
         List<Transacao> transacoes = transacaoDao.lerPorCpfComDatas(cpf, dataInicialStr, dataFinalStr);
         
-        for (Transacao t : transacoes) {//testar
+        // Esta é a lógica original (sem a Correção 1 - "usuário deletado")
+        // Ela enriquece a transação com os nomes atuais do DB.
+        for (Transacao t : transacoes) {
             Usuario enviadorDb = usuarioDao.ler(t.getCpfEnviador());
             Usuario recebedorDb = usuarioDao.ler(t.getCpfRecebedor());
 
@@ -384,14 +400,10 @@ public class ClientHandler implements Runnable {
             if (hasMoreThanTwoDecimalPlaces(valor)) {
                  return createErrorResponse("depositar", "Valor inválido. O depósito não pode ter mais que duas casas decimais.");
             }
-             if (valor <= 0) { // (Validação que já existia)
+             if (valor <= 0) { 
                  return createErrorResponse("depositar", "Valor do depósito deve ser positivo.");
             }
             
-            if (valor <= 0) {
-                 return createErrorResponse("depositar", "Valor do depósito deve ser positivo.");
-            }
-
             conn = DatabaseManager.getConnection();
             conn.setAutoCommit(false);
 
@@ -404,6 +416,7 @@ public class ClientHandler implements Runnable {
             usuario.setSaldo(usuario.getSaldo() + valor);
             usuarioDao.atualizarComConexao(conn, usuario);
 
+            // CONSTRUTOR CORRIGIDO: Passa o CPF (String) para enviador e recebedor
             Transacao deposito = new Transacao(valor, cpf, cpf); 
             transacaoDao.criarComConexao(conn, deposito);
 
