@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HashSet;
 
 public class ClientHandler implements Runnable {
     private final Socket clientSocket;
@@ -98,7 +99,7 @@ public class ClientHandler implements Runnable {
                     String cpf = sessions.remove(userToken);
                     if (cpf != null) {
                         serverGUI.log("Sessão encerrada para: " + cpf);
-                        serverGUI.updateUserList(sessions.keySet());
+                        serverGUI.updateUserList(new HashSet<>(sessions.values()));
                     }
                 }
                 clientSocket.close();
@@ -195,7 +196,7 @@ public class ClientHandler implements Runnable {
             
             this.userToken = token; // Armazena o token neste handler
             sessions.put(token, cpf); // Adiciona ao mapa compartilhado
-            serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+            serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
             serverGUI.log("Login OK: " + cpf);
             
             Map<String, Object> responseMap = new HashMap<>();
@@ -214,7 +215,7 @@ public class ClientHandler implements Runnable {
         String cpf = sessions.get(token); // Pega o CPF antes de remover
         if (cpf != null && sessions.remove(token, cpf)) {
             this.userToken = null; // Limpa o token deste handler
-            serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+            serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
             serverGUI.log("Logout OK: " + cpf);
             return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
         } else {
@@ -263,7 +264,7 @@ public class ClientHandler implements Runnable {
         usuarioDao.deletar(cpf); // O "ON DELETE CASCADE" ou "SET NULL" (depende da sua versão) cuida das transações
         sessions.remove(token);
         this.userToken = null; // Limpa o token deste handler
-        serverGUI.updateUserList(sessions.keySet()); // Atualiza a GUI
+        serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
         serverGUI.log("Conta Deletada: " + cpf);
         return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
     }
