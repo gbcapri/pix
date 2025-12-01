@@ -64,6 +64,7 @@ public class Server {
         serverGUI.start();
         
         Map<String, String> sessions = new ConcurrentHashMap<>();
+        Map<String, String> activeClients = new ConcurrentHashMap<>();
                 
         try {
             DatabaseManager.initialize();
@@ -91,7 +92,7 @@ public class Server {
                 Socket clientSocket = serverSocket.accept();
                 serverGUI.log("Cliente conectado: " + clientSocket.getInetAddress().getHostAddress());
                 
-                pool.submit(new ClientHandler(clientSocket, serverGUI, sessions));
+                pool.submit(new ClientHandler(clientSocket, serverGUI, sessions, activeClients));
             }
         } catch (IOException e) {
             serverGUI.log("Erro ao iniciar o servidor na porta " + port + ": " + e.getMessage());
