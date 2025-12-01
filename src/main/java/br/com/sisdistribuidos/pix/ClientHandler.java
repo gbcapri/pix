@@ -33,19 +33,35 @@ public class ClientHandler implements Runnable {
 
     private final ServerGUI serverGUI;
     private final Map<String, String> sessions;
+    
+    private final Map<String, String> activeClients; // Mapa compartilhado de exibições
+    private final String clientConnectionId; // ID único da conexão (IP:Porta)
+    private final String clientIpDisplay;    // Texto base (IP)
+    
     private String userToken = null;
 
-    public ClientHandler(Socket socket, ServerGUI serverGUI, Map<String, String> sessions) {
+    public ClientHandler(Socket socket, ServerGUI serverGUI, Map<String, String> sessions, Map<String, String> activeClients) {
         this.clientSocket = socket;
         this.serverGUI = serverGUI;
         this.sessions = sessions;
+        this.activeClients = activeClients;
         this.objectMapper = new ObjectMapper();
         this.usuarioDao = new UsuarioDAO();
         this.transacaoDao = new TransacaoDAO();
+        
+        // Define IDs para controle da lista
+        // Usamos IP:Porta como chave única no mapa para não sobrescrever clientes no mesmo IP
+        this.clientConnectionId = socket.getRemoteSocketAddress().toString(); 
+        
+        // Define o texto base de exibição (IP)
+        // Dica: Adicionei a porta para você conseguir distinguir conexões locais, mas pode remover se quiser só o IP.
+        this.clientIpDisplay = socket.getInetAddress().getHostAddress();
     }
 
     @Override
     public void run() {
+        atualizarStatusGUI(clientIpDisplay);
+        
         try (
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
@@ -97,15 +113,24 @@ public class ClientHandler implements Runnable {
                 // Remove a sessão do usuário ao desconectar
                 if (userToken != null) {
                     String cpf = sessions.remove(userToken);
-                    if (cpf != null) {
-                        serverGUI.log("Sessão encerrada para: " + cpf);
-                        serverGUI.updateUserList(new HashSet<>(sessions.values()));
-                    }
+                    // O log e atualização via sessions foram removidos pois agora usamos activeClients
                 }
+                
+                // 4. AO DESCONECTAR TOTALMENTE: Remove da lista visual
+                activeClients.remove(clientConnectionId);
+                serverGUI.updateUserList(new HashSet<>(activeClients.values()));
+                
                 clientSocket.close();
                 serverGUI.log("Cliente desconectado: " + clientSocket.getInetAddress().getHostAddress());
             } catch (IOException e) { /* Ignorar */ }
         }
+    }
+    
+    // Método auxiliar para atualizar a GUI com o texto correto
+    private void atualizarStatusGUI(String textoExibicao) {
+        activeClients.put(clientConnectionId, textoExibicao);
+        // Enviamos os valores do activeClients (os textos) para a GUI
+        serverGUI.updateUserList(new HashSet<>(activeClients.values()));
     }
 
     String processRequest(String jsonRequest) {
@@ -174,14 +199,12 @@ public class ClientHandler implements Runnable {
         } else {
             // Loga o erro real
             serverGUI.log("ERRO em [usuario_criar] (SQLException): " + erroReal);
-            // --- CORREÇÃO AQUI ---
             // RETORNA O ERRO REAL PARA O CLIENTE
             return createErrorResponse("usuario_criar", "Erro no banco de dados: " + erroReal);
         }
     } catch (Exception e) {
         String erroReal = e.getMessage();
         serverGUI.log("ERRO em [usuario_criar] (Exception): " + erroReal);
-        // --- CORREÇÃO AQUI ---
         // RETORNA O ERRO REAL PARA O CLIENTE
         return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado: " + erroReal);
     }
@@ -198,6 +221,8 @@ public class ClientHandler implements Runnable {
             sessions.put(token, cpf); // Adiciona ao mapa compartilhado
             serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
             serverGUI.log("Login OK: " + cpf);
+            
+            atualizarStatusGUI(clientIpDisplay + " - " + cpf);
             
             Map<String, Object> responseMap = new HashMap<>();
             responseMap.put("operacao", "usuario_login");
@@ -217,6 +242,9 @@ public class ClientHandler implements Runnable {
             this.userToken = null; // Limpa o token deste handler
             serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
             serverGUI.log("Logout OK: " + cpf);
+            
+            atualizarStatusGUI(clientIpDisplay);
+            
             return createSuccessResponse("usuario_logout", "Logout realizado com sucesso.");
         } else {
             return createErrorResponse("usuario_logout", "Token inválido.");
@@ -266,6 +294,9 @@ public class ClientHandler implements Runnable {
         this.userToken = null; // Limpa o token deste handler
         serverGUI.updateUserList(new HashSet<>(sessions.values())); // Atualiza a GUI
         serverGUI.log("Conta Deletada: " + cpf);
+        
+        atualizarStatusGUI(clientIpDisplay);
+        
         return createSuccessResponse("usuario_deletar", "Usuário deletado com sucesso.");
     }
 
@@ -355,7 +386,7 @@ public class ClientHandler implements Runnable {
         
         List<Transacao> transacoes = transacaoDao.lerPorCpfComDatas(cpf, dataInicialStr, dataFinalStr);
         
-        // Esta é a lógica original (sem a Correção 1 - "usuário deletado")
+        // Esta é a lógica original
         // Ela enriquece a transação com os nomes atuais do DB.
         for (Transacao t : transacoes) {
             Usuario enviadorDb = usuarioDao.ler(t.getCpfEnviador());
