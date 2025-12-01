@@ -113,10 +113,7 @@ public class ClientHandler implements Runnable {
                 // Remove a sessão do usuário ao desconectar
                 if (userToken != null) {
                     String cpf = sessions.remove(userToken);
-                    //if (cpf != null) {
-                    //    serverGUI.log("Sessão encerrada para: " + cpf);
-                    //    serverGUI.updateUserList(new HashSet<>(sessions.values()));
-                    //}
+                    // O log e atualização via sessions foram removidos pois agora usamos activeClients
                 }
                 
                 // 4. AO DESCONECTAR TOTALMENTE: Remove da lista visual
@@ -202,14 +199,12 @@ public class ClientHandler implements Runnable {
         } else {
             // Loga o erro real
             serverGUI.log("ERRO em [usuario_criar] (SQLException): " + erroReal);
-            // --- CORREÇÃO AQUI ---
             // RETORNA O ERRO REAL PARA O CLIENTE
             return createErrorResponse("usuario_criar", "Erro no banco de dados: " + erroReal);
         }
     } catch (Exception e) {
         String erroReal = e.getMessage();
         serverGUI.log("ERRO em [usuario_criar] (Exception): " + erroReal);
-        // --- CORREÇÃO AQUI ---
         // RETORNA O ERRO REAL PARA O CLIENTE
         return createErrorResponse("usuario_criar", "Ocorreu um erro inesperado: " + erroReal);
     }
@@ -391,7 +386,7 @@ public class ClientHandler implements Runnable {
         
         List<Transacao> transacoes = transacaoDao.lerPorCpfComDatas(cpf, dataInicialStr, dataFinalStr);
         
-        // Esta é a lógica original (sem a Correção 1 - "usuário deletado")
+        // Esta é a lógica original
         // Ela enriquece a transação com os nomes atuais do DB.
         for (Transacao t : transacoes) {
             Usuario enviadorDb = usuarioDao.ler(t.getCpfEnviador());
